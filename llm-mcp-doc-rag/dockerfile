@@ -1,0 +1,18 @@
+# Base Image
+FROM python:3.12-slim
+
+WORKDIR /usr/src/app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# cuda 지원하는 경우 cuda12.1 버전 설치
+#RUN pip install torch==2.5.1+cu121 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#RUN pip install transformers==4.41.2
+#RUN pip install sentence-transformers==2.7.0
+
+
+COPY . .
+
+# Run the application
+CMD ["python", "main.py"]

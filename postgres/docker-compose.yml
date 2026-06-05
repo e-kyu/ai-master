@@ -1,0 +1,28 @@
+# Use postgres/example user/password credentials
+
+services:
+
+  db:
+    image: postgres:15.17
+    restart: always
+    ports:
+      - 15432:5432
+    # set shared memory limit when using docker compose
+    shm_size: 128mb
+    # or set shared memory limit when deploy via swarm stack
+    #volumes:
+    #  - type: tmpfs
+    #    target: /dev/shm
+    #    tmpfs:
+    #      size: 134217728 # 128*2^20 bytes = 128Mb
+    environment:
+      POSTGRES_PASSWORD: rlaqkqax
+    volumes:
+      # 호스트 경로 : 컨테이너 내부 경로
+      - "./data:/var/lib/postgresql/data"
+
+  adminer:
+    image: adminer:5.4.2
+    restart: always
+    ports:
+      - 18080:8080

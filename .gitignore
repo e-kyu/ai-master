@@ -1,0 +1,58 @@
+*.pyc
+*.db
+*.log
+.env
+__pycache__/
+vectorstore/
+postgres/data/
+.continue/
+HuggingFaceEmbedding/
+uploadFile/
+resource/
+
+# --- [ Local Data Files ] ---
+# 대용량 원본 데이터는 저장소 용량과 보안을 위해 제외합니다.
+data/
+documents/
+raw_data/
+*.pdf
+*.docx
+*.xlsx
+*.csv
+*.pptx
+
+# --- [ Audio Files ] ---
+# 대용량 음성 및 오디오 파일 제외
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.wma
+
+# --- [ Video Files (Optional) ] ---
+# 영상 처리도 병행하신다면 추가하세요
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+
+# --- [ Image Files ] ---
+# 프로젝트 내에 포함된 이미지가 아니라면 제외하는 것이 좋습니다.
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.svg
+*.bmp
+
+# --- [ Vector DB / LlamaIndex Storage ] ---
+# LlamaIndex의 index.storage_context.persist() 등으로 생성된 로컬 저장소
+storage/
+*.json
+*.parquet
+postgres/agent.sql

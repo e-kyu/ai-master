@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  kimbab-ax-mcp-doc-rag:
+    image: kimbab-ax/mcp-doc-rag:latest
+    container_name: kimbab-ax-mcp-doc-rag
+    ports:
+      - "9020:9020"
+    #restart: always  # 컨테이너 종료 시 자동 재시작 옵션 (선택 사항)

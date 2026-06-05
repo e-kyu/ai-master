@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  kimbab-ax-app:
+    image: kimbab-ax/server:latest
+    container_name: kimbab-ax-server
+    ports:
+      - "9001:9001"
+    #restart: always  # 컨테이너 종료 시 자동 재시작 옵션 (선택 사항)
