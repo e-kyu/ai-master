@@ -110,9 +110,11 @@ def startConvrstn():
 
 
 def render_ui():
-
     # 페이지 설정
-    st.set_page_config(page_title="AI Assistant", page_icon="🤖")
+    st.set_page_config(page_title="AI Assistant"
+                       , page_icon="🤖"
+                       , initial_sidebar_state="collapsed"  # 처음에는 접힌 상태
+                      )
 
     render_sidebar()
         
@@ -123,7 +125,9 @@ def render_ui():
     
         # RAG모드일 때만 accept_file을 허용한다.
         bAcceptFile = False
-        if st.session_state.ui_chat_agent_mode == "RAG":
+        if st.session_state.ui_chat_agent_mode == "NoticeScanAgent":
+            bAcceptFile = True
+        elif st.session_state.ui_chat_agent_mode == "PpsAssistAgent":
             bAcceptFile = True
 
         # uploaded_files값이 없는 경우 기본값 셋팅
