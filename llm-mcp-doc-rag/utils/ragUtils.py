@@ -148,7 +148,7 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
 
         # 5. 검색기(Retriever) 및 엔진 구성
         # 검색 범위를 좁혀 속도 향상 (similarity_top_k 조정)
-        vector_retriever = index.as_retriever(similarity_top_k=25)
+        vector_retriever = index.as_retriever(similarity_top_k=10)
 
         # 자식 노드를 찾으면 자동으로 부모 노드까지 찾아주는 재귀적 검색기 사용
         recursive_retriever = RecursiveRetriever(
@@ -161,7 +161,7 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
         # LLMRerank는 품질은 좋으나 속도가 매우 느림. 꼭 필요한 경우에만 top_n을 최소화하여 사용
         node_postprocessors = [
             SimilarityPostprocessor(similarity_cutoff=0.5),
-            LLMRerank(top_n=3) 
+            LLMRerank(top_n=1) 
         ]
 
         logger.info("단계 5: Recursive Query Engine 반환")
@@ -253,7 +253,7 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
                 index.storage_context.persist(persist_dir=save_path)
 
         # 5. 질문에 가장 적합한 문서 조각을 찾아내는 검색기를 설정합니다.
-        vector_retriever = index.as_retriever(similarity_top_k=20)
+        vector_retriever = index.as_retriever(similarity_top_k=10)
 
         # 작은 조각을 찾았을 때 자동으로 주변 문맥(부모)까지 가져오는 똑똑한 검색 방식을 사용합니다.
         recursive_retriever = RecursiveRetriever(
@@ -267,7 +267,7 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
         # TODO: FlagEmbeddingReranker를 사용하여 검색속도를 상승시키는 것이 유의미 한지 검증 필요. LLMRerank는 품질은 좋으나 속도가 매우 느림. 꼭 필요한 경우에만 top_n을 최소화하여 사용
         node_postprocessors = [
             SimilarityPostprocessor(similarity_cutoff=0.5),
-            LLMRerank(top_n=3) 
+            LLMRerank(top_n=1) 
         ]
         
 
