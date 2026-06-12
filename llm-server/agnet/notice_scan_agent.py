@@ -53,96 +53,111 @@ class AgentState(TypedDict):
     convrstn_id: str                 # 대화 ID (세션 구분자)
     convrstn_details_id:str          # 대화 내역 ID (질문-답변 쌍 구분자)
     question: str                    # 사용자가 물어본 원래 질문
-    rewrite_querys: List[str]        # 맥락이 강화된 질의문 (원래 질문 + 대화 맥락이 합쳐진 형태)
+    result_data: Dict[str, str]      # 맥락이 강화된 질의문 (원래 질문 + 대화 맥락이 합쳐진 형태)
     queries: List[str]               # 에이전트가 순차적으로 다룰 질문 목록 (예: 1번 로봇이 3개의 질문을 만들어냈다면 ["질문1", "질문2", "질문3"])
     rag_answer: str                  # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
     current_agent: str               # 현재 이 가방을 쥐고 있는 로봇의 이름
 
 
+def query_rewriter_node(state: AgentState) -> Dict[str, Any]:
+    """ 첨부한 문서를 분석하여 시스템에 반영할 수 있는 구조체를 추출한다. """
 
-def query_rewriter_node(state: AgentState) -> List[str]:
-    """ 쿼리를 하나의 항목 단위로 쪼개어 생성한다. """
+    file_path = state['file_full_path']
+    
+    # 문서 내용 읽기
+    file_content = ""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                file_content = f.read()
+        else:
+            logger.warning(f"File not found: {file_path}")
+            return {"rewrite_querys": {}}
+    except Exception as e:
+        logger.error(f"Error reading file: {e}")
+        return {"rewrite_querys": {}}
 
-    prompt = """
-당신은 RAG(Retrieval-Augmented Generation) 검색을 위한 질의문 생성기이다.
+    prompt = f"""
+당신은 첨부한 공고서를 분석하여 시스템에 반영할 수 있는 구조체 값을 추출하는 전문가이다.
 
-입력으로 다음과 같은 JSON 배열이 제공된다.
+다음은 분석할 공고서 문서의 내용이다:
+
+---
+{file_content}
+---
+
+다음은 추출해야 할 필드 정의이다:
 
 [
-  {"key": "noticeType", "description": "조달청 업무분류로 '물품', '공사', '일반용역', '기술용역', '비축' 중에서 하나만은 선택하여야 한다."},
-  {"key": "noticeName", "description": "공고의 사업명을 의미한다."}
-]
-
-각 Object에 대해 RAG 검색에 가장 적합한 질문을 생성하라.
-
-규칙
-1. 출력은 문자열 배열(JSON Array of String)만 반환한다.
-2. 각 질문에는 반드시 key명을 그대로 포함한다.
-3. description의 의미를 자연스럽게 풀어서 질문으로 작성한다.
-4. 해당 항목이 선택 가능한 값이나 정의를 가지고 있다면 질문에 포함한다.
-5. 답을 생성하는 것이 아니라, 문서에서 해당 값을 찾기 위한 검색 질의문을 생성한다.
-6. "찾아라", "무엇인가?" 등의 형태로 작성하여 검색 성능을 높인다.
-7. 불필요한 설명이나 markdown은 출력하지 않는다.
-
-예시 입력
-[
-  {
+  {{
     "key": "noticeType",
     "description": "조달청 업무분류로 '물품', '공사', '일반용역', '기술용역', '비축' 중에서 하나만은 선택하여야 한다."
-  },
-  {
+  }},
+  {{
     "key": "noticeName",
     "description": "공고의 사업명을 의미한다."
-  }
+  }}
 ]
 
-예시 출력
-[
-  "공고의 'noticeType'(조달청 업무분류) 항목은 무엇인가? 조달청 업무분류는 '물품', '공사', '일반용역', '기술용역', '비축' 중 하나의 값만 선택한다. 해당 값을 찾아라.",
-  "공고의 'noticeName'(사업명) 항목은 무엇인가? 공고에서 사업명을 의미하는 값을 찾아라."
-]
+위의 필드 정의에 따라 문서에서 해당 값을 추출하여 다음 JSON 객체 형식으로 반환하라.
 
-이제 입력된 JSON에 대해 동일한 규칙으로 결과를 생성하라.
+반환 형식 (필드명:값 형태의 JSON 객체):
+{{
+"noticeType":"값",
+"noticeName":"값"
+}}
+
+규칙:
+1. 출력은 JSON 객체만 반환한다.
+2. 각 필드의 값은 문서에서 직접 추출한 정확한 텍스트여야 한다.
+3. description의 의미에 맞는 값을 찾아서 반환한다.
+4. 불필요한 설명이나 markdown은 출력하지 않는다.
+5. 만약 해당 값을 찾을 수 없다면 "정보 없음"으로 표시한다.
 """
 
     try:
-        # 4. LLM 호출 및 결과 처리
+        # LLM 호출 및 결과 처리
         response = config.get_llm().invoke(prompt)
-        new_context = response.content.strip() if hasattr(response, "content") else str(response).strip()
-        print("Conversation context:", new_context)
+        result_text = response.content.strip() if hasattr(response, "content") else str(response).strip()
+        print("Document Analysis Result:", result_text)
 
-        # JSON Array 형식 추출 및 파싱
-        context_data = []
-        json_match = re.search(r'\[.*\]', new_context, re.DOTALL)
+        # JSON 객체 형식 추출 및 파싱
+        result_data = {}
+        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
         if json_match:
             try:
-                context_data = json.loads(json_match.group(0))
+                result_data = json.loads(json_match.group(0))
             except json.JSONDecodeError:
-                pass
+                logger.warning("Failed to parse JSON response from LLM")
+                result_data = {}
+        
         return {
-            "rewrite_querys": context_data
+            "result_data": result_data
         }
 
     except Exception as e:
+        logger.error(f"Error in query_rewriter_node: {e}")
         print(e)
         return {
-            "rewrite_querys": []
+            "result_data": {}
         }
-
-    # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
 
 async def rag_tool_call_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 2: 규정 검토봇] RAG 검색을 통해 관련 법령 텍스트를 찾아옵니다."""
 
     sse_client_addr = config.settings.MCP_DOC_RAG_URL # SSE 클라이언트 주소
+    
+    # 추출된 공고 정보를 JSON 문자열로 변환하여 시스템 메시지에 포함
+    extracted_info = json.dumps(state['result_data'], ensure_ascii=False, indent=2)
     sys_message = (
         "  - The first tool: 사용자가 첨부한 문서 내용에 근거한 답변이 필요한 경우 하위 문서경로를 사용한다. \n"
-        f"    - 첨부문서경로(file_full_path) = {state['file_full_path']}"
+        f"    - 첨부문서경로(file_full_path) = {state['file_full_path']}\n"
+        f"    - 추출된 공고 정보:\n{extracted_info}"
     )
 
     # MCP 클라이언트를 통해 도구 호출 및 대화 프로세스 수행 (LLM과 MCP 서버 간의 반복 상호작용)
     mcpclient_manager = mcpUtils.get_mcp_manager()
-    rag_answer = await mcpclient_manager.complete(sse_client_addr, sys_message, '', str(state['rewrite_querys']), False, HumanMessage(content=str(state['rewrite_querys'])))
+    rag_answer = await mcpclient_manager.complete(sse_client_addr, sys_message, '', extracted_info, False, HumanMessage(content=extracted_info))
 
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
