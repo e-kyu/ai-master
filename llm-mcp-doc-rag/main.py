@@ -152,7 +152,7 @@ async def qna_agent(**kwargs):
 TOOL_REGISTRY = {
     "QnA_doc": qna_doc,
     "QnA_agent": qna_agent,
-    "QnA_web_search": qna_web_search,
+   # "QnA_web_search": qna_web_search,
 }
 
 
