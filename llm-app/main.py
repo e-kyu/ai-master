@@ -22,9 +22,10 @@ def render_ui():
         
     if st.session_state.ui_chat_agent_mode == "PpsAssistAgent":
         # 페이지 설정
-        st.set_page_config(page_title="AI Assistant"
+        st.set_page_config(page_title="공공조달 어시스턴트"
                         , page_icon="🤖"
                         , initial_sidebar_state="collapsed"
+                        , layout="centered"
                         )
 
         render_sidebar()
@@ -33,16 +34,23 @@ def render_ui():
             
     elif st.session_state.ui_chat_agent_mode == "NoticeScanAgent":
         # 페이지 설정
-        st.set_page_config(page_title="AI Assistant"
+        st.set_page_config(page_title="공고서 파싱 에이전트"
                         , page_icon="🤖"
                         , initial_sidebar_state="collapsed"
-                        , layout="wide" # 처음에는 접힌 상태
+                        , layout="wide"
                         )
 
         render_sidebar()
 
         noticeScanAgent.render()
     else:
+        # 페이지 설정
+        st.set_page_config(page_title="새로운 에이전트 선택"
+                        , page_icon="🤖"
+                        , initial_sidebar_state="collapsed"
+                        , layout="centered"
+                        )
+
         # 제목 및 소개
         st.markdown("""
             <div style="text-align: left; padding: 2rem 0rem;">
