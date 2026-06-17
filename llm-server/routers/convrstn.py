@@ -76,4 +76,8 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
         print("=== 순수 Lang 컴포넌트 기반 파이프라인 가동 ===")
         structured = agent.run(request.fileFullPath)
 
-        return Response(content=json.dumps(structured['extracted_data'], ensure_ascii=False), media_type="application/json")
+        respomse_content = ("```json\n"
+                   f"{json.dumps(structured['extracted_data'], ensure_ascii=False)}"
+                   "\n```")
+
+        return Response(content=respomse_content, media_type="application/json")
