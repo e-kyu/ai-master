@@ -127,8 +127,6 @@ if __name__ == "__main__":
                 st.session_state.ui_chat_mode = selected_agent["description"]
                 st.session_state.ui_chat_agent_name = selected_agent["name"]
                 st.session_state.ui_chat_agent_desc = selected_agent["description"]
-            else:
-                st.warning(f"지정된 agentMode '{agentMode}'에 해당하는 에이전트를 찾을 수 없습니다.")
 
 
 
