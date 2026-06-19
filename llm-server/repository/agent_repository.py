@@ -25,36 +25,39 @@ def create_agent(agent_id: str,  access_level: str, mode: str, name: str, descri
         modelAgent: 생성된 에이전트 객체
     """
     db = SessionLocal()
-    existing_item = None
+    try:
+        existing_item = None
 
-    if agent_id is None or agent_id.strip() == "":
-        agent_id = str(uuid.uuid4())  # 고유한 agent_id 생성 (UUID 사용)
-    else:
-        # 동일한 agent_id가 존재하는지 확인 (중복 생성 방지)
-        existing_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
-    
-    if not existing_item:
-        db.execute(
-            insert(modelAgent)
-            .values({
-                       "agent_id": agent_id
-                     , "access_level": access_level
-                     , "mode": mode
-                     , "name": name
-                     , "description": description
-                     , "resource": resource
-                     , "final_prompt": final_prompt
-            })
-        )
-        db.commit()
-    
-    # 2. 생성된 객체 찾아서 반환 (None 에러 방지)
-    inserted_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
-    
-    if not inserted_item:
-        raise Exception("에이전트 생성에 실패하였습니다.")
-        
-    return inserted_item
+        if agent_id is None or agent_id.strip() == "":
+            agent_id = str(uuid.uuid4())  # 고유한 agent_id 생성 (UUID 사용)
+        else:
+            # 동일한 agent_id가 존재하는지 확인 (중복 생성 방지)
+            existing_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
+
+        if not existing_item:
+            db.execute(
+                insert(modelAgent)
+                .values({
+                           "agent_id": agent_id
+                         , "access_level": access_level
+                         , "mode": mode
+                         , "name": name
+                         , "description": description
+                         , "resource": resource
+                         , "final_prompt": final_prompt
+                })
+            )
+            db.commit()
+
+        # 2. 생성된 객체 찾아서 반환 (None 에러 방지)
+        inserted_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
+
+        if not inserted_item:
+            raise Exception("에이전트 생성에 실패하였습니다.")
+
+        return inserted_item
+    finally:
+        db.close()
 
 
 def read_agents(access_level: str = 1)->List[AgentSchema]:
@@ -68,14 +71,16 @@ def read_agents(access_level: str = 1)->List[AgentSchema]:
         List[AgentSchema]: 조회된 에이전트 스키마 리스트
     """
     db = SessionLocal()
+    try:
+        # 접근 수준에 맞는 에이전트 정보 조회
+        agent_list = db.query(modelAgent).filter(cast(modelAgent.access_level, Integer) <= cast(access_level, Integer)).all()
 
-    # 접근 수준에 맞는 에이전트 정보 조회
-    agent_list = db.query(modelAgent).filter(cast(modelAgent.access_level, Integer) <= cast(access_level, Integer)).all()
+        if agent_list is None:
+            return []
 
-    if agent_list is None:
-        return []
-    
-    return agent_list
+        return agent_list
+    finally:
+        db.close()
 
 def read_agent(agent_id: str)->AgentSchema:
     """
@@ -88,14 +93,16 @@ def read_agent(agent_id: str)->AgentSchema:
         AgentSchema: 조회된 에이전트 정보 (없을 경우 None)
     """
     db = SessionLocal()
+    try:
+        # 특정 에이전트 정보 조회
+        agent = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
 
-    # 특정 에이전트 정보 조회
-    agent = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
+        if agent is None:
+            agent = None
 
-    if agent is None:
-        agent = None
-    
-    return agent
+        return agent
+    finally:
+        db.close()
 
 
 
@@ -116,28 +123,30 @@ def update_agent(agent_id: str,  access_level: str, mode: str, name: str, descri
         modelAgent: 업데이트된 에이전트 객체
     """
     db = SessionLocal()
+    try:
+        # 해당 에이전트 ID의 정보를 갱신
+        db.execute(
+            update(modelAgent)
+            .where(modelAgent.agent_id == agent_id)
+            .values({"access_level": access_level
+                        , "mode": mode
+                        , "name": name
+                        , "description": description
+                        , "resource": resource
+                        , "final_prompt": final_prompt
+            })
+        )
+        db.commit()
 
-    # 해당 에이전트 ID의 정보를 갱신
-    db.execute(
-        update(modelAgent)
-        .where(modelAgent.agent_id == agent_id)
-        .values({"access_level": access_level
-                    , "mode": mode
-                    , "name": name
-                    , "description": description
-                    , "resource": resource
-                    , "final_prompt": final_prompt
-        })
-    )
-    db.commit()
-    
-    # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
-    updated_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
-    
-    if not updated_item:
-        raise Exception("에이전트 업데이트에 실패하였습니다.")
-        
-    return updated_item
+        # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
+        updated_item = db.query(modelAgent).filter(modelAgent.agent_id == agent_id).first()
+
+        if not updated_item:
+            raise Exception("에이전트 업데이트에 실패하였습니다.")
+
+        return updated_item
+    finally:
+        db.close()
 
 
 
@@ -152,12 +161,14 @@ def delete_agent(agent_id: str):
         bool: 삭제 성공 여부
     """
     db = SessionLocal()
+    try:
+        # 해당 에이전트 ID의 정보를 삭제
+        db.execute(
+            delete(modelAgent)
+            .where(modelAgent.agent_id == agent_id)
+        )
+        db.commit()
 
-    # 해당 에이전트 ID의 정보를 삭제
-    db.execute(
-        delete(modelAgent)
-        .where(modelAgent.agent_id == agent_id)
-    )
-    db.commit()
-    
-    return True
+        return True
+    finally:
+        db.close()

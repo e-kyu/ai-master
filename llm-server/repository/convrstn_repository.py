@@ -18,25 +18,27 @@ def create_convrstn(convrstn_id: str, dict_convrstn: dict = {}):
 
     # 1. 실제 DB 세션 생성
     db = SessionLocal()
+    try:
+        # 동일한 convrstn_id가 존재하는지 확인 (중복 생성 방지)
+        existing_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
+        if not existing_item:
+            db.execute(
+                insert(modelConvrstn)
+                .values({"convrstn_id": convrstn_id
+                        , "topic": dict_convrstn.get("topic", "")
+                })
+            )
+            db.commit()
 
-    # 동일한 convrstn_id가 존재하는지 확인 (중복 생성 방지)
-    existing_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
-    if not existing_item:
-        db.execute(
-            insert(modelConvrstn)
-            .values({"convrstn_id": convrstn_id
-                    , "topic": dict_convrstn.get("topic", "")
-            })
-        )
-        db.commit()
-    
-    # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
-    inserted_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
-    
-    if not inserted_item:
-        inserted_item = None
-        
-    return inserted_item
+        # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
+        inserted_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
+
+        if not inserted_item:
+            inserted_item = None
+
+        return inserted_item
+    finally:
+        db.close()
 
 
 
@@ -49,22 +51,24 @@ def update_convrstn_context(convrstn_id: str, context: dict):
 
     # 1. 실제 DB 세션 생성
     db = SessionLocal()
+    try:
+        # 해당 대화 ID의 주제와 맥락 정보를 갱신
+        db.execute(
+            update(modelConvrstn)
+            .where(modelConvrstn.convrstn_id == convrstn_id)
+            .values({"topic": context.get("topic", ""), "context": json.dumps(context, ensure_ascii=False), "changed_at": func.now()})
+        )
+        db.commit()
 
-    # 해당 대화 ID의 주제와 맥락 정보를 갱신
-    db.execute(
-        update(modelConvrstn)
-        .where(modelConvrstn.convrstn_id == convrstn_id)
-        .values({"topic": context.get("topic", ""), "context": json.dumps(context, ensure_ascii=False), "changed_at": func.now()})
-    )
-    db.commit()
-    
-    # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
-    updated_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
-    
-    if not updated_item:
-        updated_item = None
-        
-    return updated_item
+        # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
+        updated_item = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
+
+        if not updated_item:
+            updated_item = None
+
+        return updated_item
+    finally:
+        db.close()
 
 
 
@@ -76,27 +80,29 @@ def create_convrstn_question(convrstn_id: str, dict_convrstn_details: dict):
 
     # 1. 실제 DB 세션 생성
     db = SessionLocal()
+    try:
+        # 질문 관련 데이터 삽입
+        convrstn_details_id = str(uuid.uuid4())  # 고유한 agent_id 생성 (UUID 사용)
+        db.execute(
+            insert(modelConvrstnDetails)
+            .values({"convrstn_id": convrstn_id
+                     , "convrstn_details_id": convrstn_details_id
+                     , "context": dict_convrstn_details.get("context", "")
+                     , "question": dict_convrstn_details.get("question", "")
+                     , "enhanced_question": dict_convrstn_details.get("enhanced_question", "")
+            })
+        )
+        db.commit()
 
-    # 질문 관련 데이터 삽입
-    convrstn_details_id = str(uuid.uuid4())  # 고유한 agent_id 생성 (UUID 사용)
-    db.execute(
-        insert(modelConvrstnDetails)
-        .values({"convrstn_id": convrstn_id
-                 , "convrstn_details_id": convrstn_details_id
-                 , "context": dict_convrstn_details.get("context", "")
-                 , "question": dict_convrstn_details.get("question", "")
-                 , "enhanced_question": dict_convrstn_details.get("enhanced_question", "")
-        })
-    )
-    db.commit()
-    
-    # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
-    inserted_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == convrstn_details_id)).first()
-    
-    if not inserted_item:
-        inserted_item = None
-        
-    return inserted_item
+        # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
+        inserted_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == convrstn_details_id)).first()
+
+        if not inserted_item:
+            inserted_item = None
+
+        return inserted_item
+    finally:
+        db.close()
 
 
 def create_convrstn_answer(convrstn_id: str, dict_convrstn_details: dict):
@@ -106,29 +112,31 @@ def create_convrstn_answer(convrstn_id: str, dict_convrstn_details: dict):
 
     # 1. 실제 DB 세션 생성
     db = SessionLocal()
+    try:
+        # 가장 최근의 대화 상세 내역에 답변 내용과 답변 시간을 기록
+        db.execute(
+            update(modelConvrstn)
+            .where(modelConvrstn.convrstn_id == convrstn_id)
+            .values({"agent_id": dict_convrstn_details.get("agent_id", None)})
+        )
 
-    # 가장 최근의 대화 상세 내역에 답변 내용과 답변 시간을 기록
-    db.execute(
-        update(modelConvrstn)
-        .where(modelConvrstn.convrstn_id == convrstn_id)
-        .values({"agent_id": dict_convrstn_details.get("agent_id", None)})
-    )
+        # 가장 최근의 대화 상세 내역에 답변 내용과 답변 시간을 기록
+        db.execute(
+            update(modelConvrstnDetails)
+            .where(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == dict_convrstn_details.get("convrstn_details_id")))
+            .values({"answer": dict_convrstn_details.get("answer", ""), "answer_at": func.now(), "agent_id": dict_convrstn_details.get("agent_id", None)})
+        )
+        db.commit()
 
-    # 가장 최근의 대화 상세 내역에 답변 내용과 답변 시간을 기록
-    db.execute(
-        update(modelConvrstnDetails)
-        .where(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == dict_convrstn_details.get("convrstn_details_id")))
-        .values({"answer": dict_convrstn_details.get("answer", ""), "answer_at": func.now(), "agent_id": dict_convrstn_details.get("agent_id", None)})
-    )
-    db.commit()
-    
-    # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
-    updated_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == dict_convrstn_details.get("convrstn_details_id"))).first()
-    
-    if not updated_item:
-        updated_item = None
-        
-    return updated_item
+        # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
+        updated_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == dict_convrstn_details.get("convrstn_details_id"))).first()
+
+        if not updated_item:
+            updated_item = None
+
+        return updated_item
+    finally:
+        db.close()
 
 
 
@@ -138,14 +146,16 @@ def read_context_convrstn(convrstn_id: str)->str:
     """
     
     db = SessionLocal()
+    try:
+        # 대화 기본 정보에서 context 필드만 추출
+        convrstnInfo = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
 
-    # 대화 기본 정보에서 context 필드만 추출
-    convrstnInfo = db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).first()
+        if convrstnInfo is None:
+            return ""
 
-    if convrstnInfo is None:
-        return ""
-    
-    return convrstnInfo.context
+        return convrstnInfo.context
+    finally:
+        db.close()
 
 
 def read_recent_convrstn(convrstn_id: str, limit: int=6)->List[str]:
@@ -154,10 +164,13 @@ def read_recent_convrstn(convrstn_id: str, limit: int=6)->List[str]:
     """
     
     db = SessionLocal()
-    # 생성 시간 역순으로 정렬하여 제한된 개수만큼 가져옴
-    results = db.query(modelConvrstnDetails).filter(modelConvrstnDetails.convrstn_id == convrstn_id).order_by(modelConvrstnDetails.created_at.desc()).limit(limit).all()
+    try:
+        # 생성 시간 역순으로 정렬하여 제한된 개수만큼 가져옴
+        results = db.query(modelConvrstnDetails).filter(modelConvrstnDetails.convrstn_id == convrstn_id).order_by(modelConvrstnDetails.created_at.desc()).limit(limit).all()
 
-    return results
+        return results
+    finally:
+        db.close()
 
 
 
@@ -167,37 +180,39 @@ def read_convrstn_list(skip: int = 0, limit: int = 100) -> List[ConvrstnListSche
     전체 대화 목록을 최신순으로 조회합니다.
     """
     db = SessionLocal()
-    
-    # 정렬 기준: 변경일시(changed_at)가 있으면 우선, 없으면 생성일시(created_at) 기준
-    sort_col = func.coalesce(modelConvrstn.changed_at, modelConvrstn.created_at)
+    try:
+        # 정렬 기준: 변경일시(changed_at)가 있으면 우선, 없으면 생성일시(created_at) 기준
+        sort_col = func.coalesce(modelConvrstn.changed_at, modelConvrstn.created_at)
 
-    results = (
-            db.query(
-                modelConvrstn.convrstn_id,
-                modelConvrstn.created_at,
-                modelConvrstn.topic,
-                modelConvrstn.context,
-                modelConvrstn.changed_at,
-                modelAgent.agent_id,
-                modelAgent.mode,
-                modelAgent.name,
-                modelAgent.description
-            )
-            # JOIN 조건에 access_level을 포함
-            .outerjoin(
-                modelAgent,
-                and_(
-                    modelAgent.agent_id == modelConvrstn.agent_id,
-                    modelAgent.access_level == '1'
+        results = (
+                db.query(
+                    modelConvrstn.convrstn_id,
+                    modelConvrstn.created_at,
+                    modelConvrstn.topic,
+                    modelConvrstn.context,
+                    modelConvrstn.changed_at,
+                    modelAgent.agent_id,
+                    modelAgent.mode,
+                    modelAgent.name,
+                    modelAgent.description
                 )
+                # JOIN 조건에 access_level을 포함
+                .outerjoin(
+                    modelAgent,
+                    and_(
+                        modelAgent.agent_id == modelConvrstn.agent_id,
+                        modelAgent.access_level == '1'
+                    )
+                )
+                .order_by(sort_col.desc())
+                .offset(skip)
+                .limit(limit)
+                .all()
             )
-            .order_by(sort_col.desc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
-    
-    return results
+
+        return results
+    finally:
+        db.close()
 
 
 def read_convrstn_details(convrstn_id: str)-> List[ConvrstnDetailsSchema]:
@@ -205,8 +220,11 @@ def read_convrstn_details(convrstn_id: str)-> List[ConvrstnDetailsSchema]:
     특정 대화 ID의 상세 내역(질문/답변 리스트)을 조회합니다.
     """
     db = SessionLocal()
-    convrstnDetails = db.query(modelConvrstnDetails).filter(modelConvrstnDetails.convrstn_id == convrstn_id).order_by(modelConvrstnDetails.created_at.asc()).all()
-    return convrstnDetails
+    try:
+        convrstnDetails = db.query(modelConvrstnDetails).filter(modelConvrstnDetails.convrstn_id == convrstn_id).order_by(modelConvrstnDetails.created_at.asc()).all()
+        return convrstnDetails
+    finally:
+        db.close()
 
 
 def delete_convrstn(convrstn_id: str):
