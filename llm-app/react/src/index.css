@@ -1,0 +1,45 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+@theme {
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", Roboto, sans-serif;
+
+  --color-brand-50: #f5f4ff;
+  --color-brand-100: #ece9ff;
+  --color-brand-200: #d9d3ff;
+  --color-brand-300: #b8acff;
+  --color-brand-400: #9580ff;
+  --color-brand-500: #7c5cff;
+  --color-brand-600: #6a3bf0;
+  --color-brand-700: #5829c7;
+  --color-brand-800: #45219c;
+  --color-brand-900: #341a72;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background-color: var(--color-sky-50);
+  color: var(--color-zinc-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-zinc-300);
+  border-radius: 9999px;
+}

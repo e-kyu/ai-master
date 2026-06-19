@@ -1,0 +1,38 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Py: LLM-MCP-DOC-RAG",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./llm-mcp-doc-rag/main.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Py: LLM-Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "./llm-server/main.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Py: LLM-App",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "streamlit",
+            "args": [
+                "run",
+                "./llm-app/streamlit/main.py"
+            ],
+            "justMyCode": true,
+        },
+        {
+            "name": "react.js: LLM-App",
+            "type": "node-terminal",
+            "request": "launch",
+            "command": "npm run dev",
+            "cwd": "${workspaceFolder}/llm-app/react",
+            "console": "integratedTerminal"
+        }
+    ]
+}
