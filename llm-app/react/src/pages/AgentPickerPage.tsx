@@ -2,29 +2,21 @@ import { useAgents } from "../hooks/useAgents"
 import { AgentCard } from "../components/agent-picker/AgentCard"
 import { Spinner } from "../components/common/Spinner"
 import { EmptyState } from "../components/common/EmptyState"
-import { SparkleIcon } from "../components/common/Icons"
 
 export function AgentPickerPage() {
   const { agents, loading, error } = useAgents()
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
-      <div className="relative mb-12 overflow-hidden rounded-3xl bg-gradient-to-br from-brand-600 via-brand-500 to-violet-500 px-6 py-10 text-white shadow-lg shadow-brand-200 sm:px-10 sm:py-14">
-        <div className="absolute -right-16 -top-16 size-64 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-20 left-1/3 size-72 rounded-full bg-black/10 blur-3xl" />
+    <div className="mx-auto max-w-6xl px-4 py-1 sm:px-6 lg:px-8">
 
-        <div className="relative inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-medium text-white/90 ring-1 ring-white/25 backdrop-blur-sm">
-          <SparkleIcon className="size-3.5" />
-          공공조달 어시스턴트
-        </div>
-        <h1 className="relative mt-4 text-base font-medium text-white/80 sm:text-lg">안녕하세요!</h1>
-        <h2 className="relative mt-1 text-3xl font-extrabold tracking-tight sm:text-4xl">
-          어떤 도움이 필요하신가요?
-        </h2>
-        <p className="relative mt-3 max-w-md text-sm text-white/80 sm:text-base">
-          아래에서 원하는 에이전트를 선택하면 바로 대화를 시작할 수 있어요.
-        </p>
+      <div className="mx-auto max-w-2xl text-left">
+
+        <h1 className="mt-5 text-lg font-medium text-zinc-500">안녕하세요!</h1>
+        <h2 className="mt-2 mb-6 text-2xl font-extrabold tracking-tight sm:text-3xl">어떤 도움이 필요하신가요?</h2>
+        
       </div>
+
+
 
       {loading && (
         <div className="flex items-center justify-center gap-2 py-20 text-zinc-400">

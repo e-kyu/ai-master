@@ -52,7 +52,6 @@ export function PpsAssistAgentPage() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col">
       <div className="border-b border-zinc-100 px-4 py-4 sm:px-6">
-        <h1 className="text-lg font-semibold text-zinc-900">{selectedAgent.name}</h1>
         <p className="mt-0.5 text-sm text-zinc-500">{selectedAgent.description}</p>
         <label className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
           <input

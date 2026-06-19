@@ -66,7 +66,6 @@ export function NoticeScanAgentPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 lg:py-8">
-      <h1 className="text-lg font-semibold text-zinc-900">{selectedAgent.name}</h1>
       <p className="mt-0.5 text-sm text-zinc-500">{selectedAgent.description}</p>
 
       <div className="mt-5 flex flex-col gap-4">

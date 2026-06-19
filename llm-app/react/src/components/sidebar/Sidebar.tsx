@@ -77,7 +77,7 @@ export function Sidebar() {
           <div className="px-3 pt-4">
             <button
               type="button"
-              onClick={() => navigate("/")}
+              onClick={() => {setSidebarOpen(false); navigate("/")}}
               className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-sm font-medium text-brand-700 transition hover:bg-brand-100"
             >
               <PlusIcon className="size-4" />

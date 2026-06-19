@@ -51,23 +51,40 @@ export interface NoticeGeneralInfo {
   contractMethod?: string
   noticeName?: string
   noticeNo?: string
+  refNo?: string
   postDate?: string
   agency?: string
+  demandAgency?: string
+  contractType?: string
+  contractForm?: string
+  bidMethod?: string
+  stockType?: string
   awardMethod?: string
   awardDetail?: string
+  rebidYn?: string
   [key: string]: unknown
 }
 
 export interface NoticeExecutionInfo {
+  bidStartDate?: string
   bidEndDate?: string
   manager?: string
   openDate?: string
   openPlace?: string
   depositExemptYn?: string
+  depositDate?: string
+  relatedNotice?: string
   [key: string]: unknown
 }
 
 export interface NoticeItem {
+  itemNo?: string
+  itemName?: string
+  standard?: string
+  unit?: string
+  quantity?: number | string | null
+  unitPrice?: number | string | null
+  amount?: number | string | null
   [key: string]: unknown
 }
 
@@ -75,10 +92,15 @@ export interface NoticeExtractedData {
   general?: NoticeGeneralInfo
   execution?: NoticeExecutionInfo
   items?: NoticeItem[]
+  progresses?: unknown[]
+  statuses?: unknown[]
 }
 
 export interface NoticeScanResult {
   is_violating?: boolean
   extracted_data?: NoticeExtractedData
+  document_text?: string
+  status?: string
+  error_message?: string | null
   [key: string]: unknown
 }
