@@ -1,7 +1,8 @@
 import uvicorn
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from routers import convrstn, convrstnHistory, agent
+from routers import convrstn, convrstnHistory, agent, upload
 
 # 데이터베이스 초기화를 위한 임포트 추가
 from db.database import Base, engine
@@ -17,10 +18,20 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# React 개발 서버(Vite)에서의 cross-origin 호출 허용
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # router 추가
 app.include_router(convrstn.router)
 app.include_router(convrstnHistory.router)
 app.include_router(agent.router)
+app.include_router(upload.router)
 
 # 실행은 server 경로에서
 # . venv/bin/activate
