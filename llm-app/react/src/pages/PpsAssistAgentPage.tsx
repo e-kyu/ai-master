@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { useAppState } from "../context/appStateStore"
 import { askQuestionStreaming } from "../api/qna"
 import { ChatMessageBubble } from "../components/chat/ChatMessage"
@@ -19,14 +20,15 @@ export function PpsAssistAgentPage() {
 
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const autoSentRef = useRef(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages, sending])
 
-  if (!selectedAgent) return null
-
   const handleSend = async (question: string, fileFullPath: string) => {
+    if (!selectedAgent) return
     appendMessage({ question, answer: "" })
     setSending(true)
     try {
@@ -48,6 +50,27 @@ export function PpsAssistAgentPage() {
       setSending(false)
     }
   }
+
+  // URL의 question 쿼리 파라미터로 진입한 경우, 메세지를 자동으로 채워 전송한다.
+  // 예: /agent/PpsAssistAgent/?question=%22비축업무가뭐야?%22
+  useEffect(() => {
+    if (!selectedAgent || autoSentRef.current) return
+    const raw = searchParams.get("question")
+    if (!raw) return
+    autoSentRef.current = true
+    const question = raw.replace(/^"|"$/g, "")
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete("question")
+        return next
+      },
+      { replace: true },
+    )
+    if (question) handleSend(question, "")
+  }, [selectedAgent, searchParams, setSearchParams])
+
+  if (!selectedAgent) return null
 
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col">
