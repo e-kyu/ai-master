@@ -231,6 +231,8 @@ if __name__ == "__main__":
     # config.py에 정의된 LLM 설정 적용
     Settings.llm = config.settings.get_llm()
 
+    Settings.embed_batch_size = 128  # 혹은 128 (시스템 환경에 맞게 조정)
+
     # config.py에 정의된 임베딩(문장 수치화) 모델 설정 적용
     Settings.embed_model = config.settings.get_embeddings()
 

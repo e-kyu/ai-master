@@ -58,7 +58,74 @@ def getRagPromft():
         """
 
 
-def parse_law_to_hierarchical_nodes(llama_docs):
+def generate_smart_chunking_patterns(llama_docs, sample_size=10):
+    """
+    간단한 스마트 청킹 패턴 생성기(정규식 최적화용).
+    일부 문서 페이지를 샘플로 받아서 문서에서 자주 등장하는 조문 및 항 표기 패턴을 탐지하여
+    article_pattern 및 child_pattern 후보를 반환합니다.
+    """
+    if llama_docs:
+        if len(llama_docs) <= sample_size:
+            texts = [doc.text for doc in llama_docs]
+        else:
+            step = len(llama_docs) / sample_size
+            indices = [min(int(i * step), len(llama_docs) - 1) for i in range(sample_size)]
+            texts = [llama_docs[idx].text for idx in indices]
+    else:
+        texts = [""]
+
+    sample = "\n".join(texts)
+
+    # 후보 패턴들 (법률 문서에서 흔히 쓰이는 형태들을 우선 제시)
+    # 국내(한국) 패턴 외에 국제적으로 자주 쓰이는 패턴(영문/라틴식, 섹션 기호 등)을 추가
+    article_candidates = [
+        r'(제\d+조(?:의\d+)?\(.*?\))',
+        r'(제\d+조(?:의\d+)?)',
+        r'(^제\s*\d+\s*조[\s\S]{0,60}?)(?=\n|$)',
+        r'(제\d+조\([^\)]+\))',
+        r'(\b제\d+조(?:의\d+)?\b)',
+        # English / International patterns
+        r'\bArticle\s+\d+[A-Za-z0-9\-]*\b',    # Article 1, Article 1-2
+        r'\bArt\.\s*\d+\b',                    # Art. 1
+        r'\bSection\s+\d+\b',                  # Section 1
+        r'\bSec\.\s*\d+\b',                    # Sec. 1
+        r'§\s*\d+[A-Za-z0-9\-]*',                # § 1, § 1-2
+        r'\bChapter\s+\d+\b'                   # Chapter 1
+    ]
+    child_candidates = [
+        r'(\([①-⑳]\)|[①-⑳])',           # circled numbers
+        r'(\(\d+\)|\d+\.)',            # (1) or 1.
+        r'(\([가-힣]\)|[가-힣]\.)',       # (가) or 가.
+        r'(\([A-Za-z]\)|[A-Za-z]\.)',    # (a) or a.
+        # International/sub-clause patterns
+        r'\b\([ivxIVX]+\)\b|\b[ivxIVX]+\.',   # (iv) or iv.
+        r'\b\([a-z]\)\b|\b[a-z]\.',           # (a) or a.
+        r'\b\([A-Z]\)\b|\b[A-Z]\.',           # (A) or A.
+        r'\b\d+\)\b',                           # 1)
+        r'^[\-\*]\s+',                           # bullet lists starting with - or *
+    ]
+
+    def score_pattern(pat, text):
+        try:
+            return len(re.findall(pat, text))
+        except re.error:
+            return 0
+
+    best_article = max(article_candidates, key=lambda p: score_pattern(p, sample))
+    best_child = max(child_candidates, key=lambda p: score_pattern(p, sample))
+
+    return {
+        "article_pattern": best_article,
+        "child_pattern": best_child,
+        "sample_counts": {
+            "article_matches": score_pattern(best_article, sample),
+            "child_matches": score_pattern(best_child, sample)
+        }
+    }
+
+
+
+def parse_law_to_hierarchical_nodes(llama_docs, article_pattern, child_pattern):
     """
     법률 문서를 조(Parent) 단위와 항/호(Child) 단위로 계층 분할하는 함수
     """
@@ -68,14 +135,33 @@ def parse_law_to_hierarchical_nodes(llama_docs):
 
     # 전체 문서를 하나의 텍스트로 합치기 (페이지 분할로 조항이 끊기는 것을 방지)
     full_text = "\n".join([doc.text for doc in llama_docs])
-    
-    # 1. '제X조' 또는 '제X조의X' 패턴으로 부모(조문) 분할
-    # 패턴 설명: '제' + 숫자 + '조' (또는 '제' + 숫자 + '조의' + 숫자)로 시작하는 구문 탐색
-    article_pattern = r'(제\d+조(?:의\d+)?\(.*?\))'
-    splits = re.split(article_pattern, full_text)
+
+    # 문서 메타데이터에서 법률명을 추출
+    law_title = "답변자료"
+    if llama_docs:
+        first_meta = getattr(llama_docs[0], "metadata", {})
+        if isinstance(first_meta, dict):
+            fname = first_meta.get("file_name")
+            if fname:
+                # 파일명에서 확장자 제거
+                law_title = os.path.splitext(fname)[0]
+
+    # 컴파일하여 멀티라인/유니코드 처리를 명시적으로 수행
+    try:
+        article_re = re.compile(article_pattern, flags=re.MULTILINE)
+    except re.error:
+        article_re = re.compile(r'(제\d+조(?:의\d+)?\(.*?\))', flags=re.MULTILINE)
+
+    try:
+        child_re = re.compile(child_pattern, flags=re.MULTILINE)
+    except re.error:
+        child_re = re.compile(r'(\([①-⑳]\)|[①-⑳])', flags=re.MULTILINE)
+
+    splits = re.split(article_re, full_text)
     
     # 첫 조항이 나오기 전 서론/목적 정보 처리
-    if splits and not re.match(article_pattern, splits[0].strip()):
+    # 첫 요소가 조문 제목이 아니라면 서론으로 간주
+    if splits and not article_re.match(splits[0].strip()):
         intro_text = splits.pop(0).strip()
         if intro_text:
             p_node = TextNode(text=intro_text, metadata={"type": "intro"})
@@ -96,7 +182,7 @@ def parse_law_to_hierarchical_nodes(llama_docs):
         parent_node = TextNode(
             text=full_article_text,
             metadata={
-                "law_title": "국가를 당사자로 하는 계약에 관한 법률",
+                "law_title": law_title,
                 "article_title": title,
                 "type": "parent"
             }
@@ -106,11 +192,12 @@ def parse_law_to_hierarchical_nodes(llama_docs):
         all_nodes.append(parent_node)
 
         # 2. 부모 본문 안에서 항(①, ②, ③) 단위로 자식 노드 분할
-        paragraphs = re.split(r'(\([①-⑮]\)|[①-⑮])', content)
+        # 항(Child) 분할 시에도 컴파일된 정규식을 사용
+        paragraphs = re.split(child_re, content)
         
         child_chunks = []
         # 첫 항 시작 전 문구(예: 조항 본문 바로 시작)가 있다면 추가
-        if paragraphs and not re.match(r'(\([①-⑮]\)|[①-⑮])', paragraphs[0].strip()):
+        if paragraphs and not child_re.match(paragraphs[0].strip()):
             first_text = paragraphs.pop(0).strip()
             if first_text:
                 child_chunks.append(first_text)
@@ -127,12 +214,12 @@ def parse_law_to_hierarchical_nodes(llama_docs):
                 continue
             
             # 자식 검색 시 상위 맥락 유실을 방지하기 위해 '법률명 + 조항제목'을 Prefix로 주입
-            contextualized_text = f"법률명: 국가를 당사자로 하는 계약에 관한 법률\n조항: {title}\n내용: {chunk}"
+            contextualized_text = f"법률명: {law_title}\n조항: {title}\n내용: {chunk}"
             
             child_node = TextNode(
                 text=contextualized_text,
                 metadata={
-                    "law_title": "국가를 당사자로 하는 계약에 관한 법률",
+                    "law_title": law_title,
                     "article_title": title,
                     "type": "child"
                 }
@@ -140,6 +227,44 @@ def parse_law_to_hierarchical_nodes(llama_docs):
             # IndexNode를 통해 부모의 node_id를 가리키도록 설정 (재귀 탐색의 핵심)
             i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
             all_nodes.append(i_node)
+
+    return all_nodes, node_dict
+
+
+def create_hierarchical_nodes_with_splitters(
+    documents,
+    parent_chunk_size=1024,
+    parent_chunk_overlap=100,
+    child_chunk_size=256,
+    child_chunk_overlap=50,
+):
+    """
+    기본 Parent-Child 계층형 청킹 구현.
+    부모는 긴 문맥 유지용, 자식은 벡터 검색용 작은 청크로 생성합니다.
+    """
+    parent_splitter = SentenceSplitter(
+        chunk_size=parent_chunk_size,
+        chunk_overlap=parent_chunk_overlap,
+    )
+    child_splitter = SentenceSplitter(
+        chunk_size=child_chunk_size,
+        chunk_overlap=child_chunk_overlap,
+    )
+
+    parent_nodes = parent_splitter.get_nodes_from_documents(documents)
+    all_nodes = []
+    node_dict = {}
+
+    for parent_node in parent_nodes:
+        child_nodes = child_splitter.get_nodes_from_documents([parent_node])
+        for child_node in child_nodes:
+            if not child_node.text.strip():
+                continue
+            indexed_child = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
+            all_nodes.append(indexed_child)
+
+        node_dict[parent_node.node_id] = parent_node
+        all_nodes.append(parent_node)
 
     return all_nodes, node_dict
 
@@ -193,7 +318,20 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
 
             # 🚀 [변경 포인트] 기존 SentenceSplitter 대신 법률 맞춤형 정적 분할 함수 호출
             logger.info("단계 2: 법률 구조 기반 계층형 노드 생성 (Parent-Child)")
-            all_nodes, node_dict = parse_law_to_hierarchical_nodes(llama_docs)
+
+            # 1. 샘플 문서를 기반으로 유효한 조문/항 패턴을 동적으로 탐지
+            patterns = generate_smart_chunking_patterns(llama_docs)
+
+            if patterns.get("sample_counts", {}).get("article_matches", 0) < 1 or patterns.get("sample_counts", {}).get("child_matches", 0) < 1:
+                logger.warning("샘플 문서에서 조문 패턴을 찾지 못했습니다. 기본 Parent-Child 계층형 청킹을 적용합니다.")
+                all_nodes, node_dict = create_hierarchical_nodes_with_splitters(llama_docs)
+            else:
+                article_pattern = patterns.get("article_pattern", r'(제\d+조(?:의\d+)?\(.*?\))')
+                child_pattern = patterns.get("child_pattern", r'(\([①-⑳]\)|[①-⑳])')
+                all_nodes, node_dict = parse_law_to_hierarchical_nodes(llama_docs, article_pattern, child_pattern)
+                if not all_nodes:
+                    logger.info("법률 구조 기반 노드 생성에 실패하여 기본 계층형 청킹으로 재시도합니다.")
+                    all_nodes, node_dict = create_hierarchical_nodes_with_splitters(llama_docs)
 
             # 단계 3: 검색을 위한 벡터 인덱스 생성
             logger.info("단계 3: 재귀 탐색용 인덱스 생성")
