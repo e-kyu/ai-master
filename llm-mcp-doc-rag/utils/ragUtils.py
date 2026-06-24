@@ -3,6 +3,8 @@ import hashlib
 import zipfile
 import tarfile
 import shutil
+import re
+
 from utils import config, loggerUtil
 from datetime import datetime
 
@@ -14,7 +16,7 @@ import faiss
 
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.retrievers import RecursiveRetriever
-from llama_index.core.schema import IndexNode
+from llama_index.core.schema import IndexNode, TextNode
 from llama_index.core.postprocessor import SimilarityPostprocessor, LLMRerank
 from llama_index.core import Settings as LlamaSettings
 
@@ -56,8 +58,92 @@ def getRagPromft():
         """
 
 
+def parse_law_to_hierarchical_nodes(llama_docs):
+    """
+    법률 문서를 조(Parent) 단위와 항/호(Child) 단위로 계층 분할하는 함수
+    """
+    parent_nodes = []
+    all_nodes = []
+    node_dict = {}
 
-# 파일 경로를 전달하면 LlamaIndex를 사용하여 문서를 로드하고, 벡터 인덱스를 생성하여 검색기(Retriever)를 반환한다.
+    # 전체 문서를 하나의 텍스트로 합치기 (페이지 분할로 조항이 끊기는 것을 방지)
+    full_text = "\n".join([doc.text for doc in llama_docs])
+    
+    # 1. '제X조' 또는 '제X조의X' 패턴으로 부모(조문) 분할
+    # 패턴 설명: '제' + 숫자 + '조' (또는 '제' + 숫자 + '조의' + 숫자)로 시작하는 구문 탐색
+    article_pattern = r'(제\d+조(?:의\d+)?\(.*?\))'
+    splits = re.split(article_pattern, full_text)
+    
+    # 첫 조항이 나오기 전 서론/목적 정보 처리
+    if splits and not re.match(article_pattern, splits[0].strip()):
+        intro_text = splits.pop(0).strip()
+        if intro_text:
+            p_node = TextNode(text=intro_text, metadata={"type": "intro"})
+            parent_nodes.append(p_node)
+
+    # 조항 제목과 본문 매칭하여 Parent Node 생성
+    articles = []
+    for i in range(0, len(splits), 2):
+        if i + 1 < len(splits):
+            title = splits[i].strip()
+            content = splits[i+1].strip()
+            articles.append((title, content))
+
+    for title, content in articles:
+        full_article_text = f"{title}\n{content}"
+        
+        # 부모 노드 생성
+        parent_node = TextNode(
+            text=full_article_text,
+            metadata={
+                "law_title": "국가를 당사자로 하는 계약에 관한 법률",
+                "article_title": title,
+                "type": "parent"
+            }
+        )
+        parent_nodes.append(parent_node)
+        node_dict[parent_node.node_id] = parent_node
+        all_nodes.append(parent_node)
+
+        # 2. 부모 본문 안에서 항(①, ②, ③) 단위로 자식 노드 분할
+        paragraphs = re.split(r'(\([①-⑮]\)|[①-⑮])', content)
+        
+        child_chunks = []
+        # 첫 항 시작 전 문구(예: 조항 본문 바로 시작)가 있다면 추가
+        if paragraphs and not re.match(r'(\([①-⑮]\)|[①-⑮])', paragraphs[0].strip()):
+            first_text = paragraphs.pop(0).strip()
+            if first_text:
+                child_chunks.append(first_text)
+                
+        for j in range(0, len(paragraphs), 2):
+            if j + 1 < len(paragraphs):
+                p_num = paragraphs[j].strip()
+                p_text = paragraphs[j+1].strip()
+                child_chunks.append(f"{p_num} {p_text}")
+
+        # 자식 노드들을 IndexNode로 변환하여 부모 ID와 연결
+        for chunk in child_chunks:
+            if not chunk.strip():
+                continue
+            
+            # 자식 검색 시 상위 맥락 유실을 방지하기 위해 '법률명 + 조항제목'을 Prefix로 주입
+            contextualized_text = f"법률명: 국가를 당사자로 하는 계약에 관한 법률\n조항: {title}\n내용: {chunk}"
+            
+            child_node = TextNode(
+                text=contextualized_text,
+                metadata={
+                    "law_title": "국가를 당사자로 하는 계약에 관한 법률",
+                    "article_title": title,
+                    "type": "child"
+                }
+            )
+            # IndexNode를 통해 부모의 node_id를 가리키도록 설정 (재귀 탐색의 핵심)
+            i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
+            all_nodes.append(i_node)
+
+    return all_nodes, node_dict
+
+# 작성해주신 기존 엔진 생성 함수에 연동
 def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
     if not input_path:
         return None
@@ -65,9 +151,8 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
     today_str = datetime.now().strftime("%Y%m%d")
     is_compressed = False
     
-    # 1. 파일 경로를 기반으로 고유한 ID(해시) 생성 및 저장 경로 설정
     md5_doc = hashlib.md5(input_path.encode('utf-8')).hexdigest()
-    temp_extract_path = f"./temp_extracted/{md5_doc}" # 압축 해제용 임시 폴더
+    temp_extract_path = f"./temp_extracted/{md5_doc}"
     save_path = f"./vectorstore/{today_str}/{md5_doc}"
     if is_base_resource:
         save_path = f"./vectorstore/base_resource/{md5_doc}"
@@ -76,7 +161,6 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
         index = None
         node_dict = {}
 
-        # 이미 저장된 index가 존재한다면 기존 것을 사용
         if is_save and os.path.isdir(save_path):
             logger.info(f"기존 벡터스토어를 로드합니다: {save_path}")
             vector_store = FaissVectorStore.from_persist_dir(save_path)
@@ -84,28 +168,22 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
                 vector_store=vector_store, persist_dir=save_path
             )
             index = load_index_from_storage(storage_context)
-            # 저장된 인덱스의 docstore에서 노드 정보를 가져와 매핑 데이터 복원
             node_dict = index.docstore.docs
         else:
-            # 2. 압축 파일 여부 확인 및 해제
             actual_data_path = input_path
-            
             if input_path.endswith(('.zip', '.tar', '.tar.gz', '.tgz')):
                 logger.info(f"단계 0: 압축 파일 감지 - 해제 중... ({input_path})")
                 os.makedirs(temp_extract_path, exist_ok=True)
-                
                 if input_path.endswith('.zip'):
                     with zipfile.ZipFile(input_path, 'r') as zip_ref:
                         zip_ref.extractall(temp_extract_path)
                 elif input_path.endswith(('.tar', '.tar.gz', '.tgz')):
                     with tarfile.open(input_path, 'r:*') as tar_ref:
                         tar_ref.extractall(temp_extract_path)
-                
                 actual_data_path = temp_extract_path
                 is_compressed = True
 
             logger.info(f"단계 1: 문서 로드 중... ({actual_data_path})")
-            # 폴더 또는 파일을 읽어오는 Reader 설정
             reader = SimpleDirectoryReader(
                 input_dir=actual_data_path if os.path.isdir(actual_data_path) else None,
                 input_files=[actual_data_path] if os.path.isfile(actual_data_path) else None,
@@ -113,27 +191,12 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
             )
             llama_docs = reader.load_data()
 
-            # 단계 2: 문서를 큰 덩어리(부모)와 작은 덩어리(자식)로 나누어 계층 구조 생성
-            logger.info("단계 2: 계층형 노드 생성 (Parent-Child)")
-            parent_splitter = SentenceSplitter(chunk_size=1024, chunk_overlap=100)
-            child_splitter = SentenceSplitter(chunk_size=256, chunk_overlap=50)
-
-            parent_nodes = parent_splitter.get_nodes_from_documents(llama_docs)
-            all_nodes = []
-
-            for parent in parent_nodes:
-                child_nodes = child_splitter.get_nodes_from_documents([parent])
-                for child in child_nodes:
-                    # 자식 노드가 부모 노드의 ID를 참조하도록 연결
-                    i_node = IndexNode.from_text_node(child, index_id=parent.node_id)
-                    all_nodes.append(i_node)
-                node_dict[parent.node_id] = parent
-                all_nodes.append(parent)
+            # 🚀 [변경 포인트] 기존 SentenceSplitter 대신 법률 맞춤형 정적 분할 함수 호출
+            logger.info("단계 2: 법률 구조 기반 계층형 노드 생성 (Parent-Child)")
+            all_nodes, node_dict = parse_law_to_hierarchical_nodes(llama_docs)
 
             # 단계 3: 검색을 위한 벡터 인덱스 생성
             logger.info("단계 3: 재귀 탐색용 인덱스 생성")
-            
-            # 임베딩 차원을 동적으로 파악하여 FAISS 인덱스 생성 (속도 향상을 위해 IndexFlatIP 또는 HNSW 고려 가능)
             sample_embedding = LlamaSettings.embed_model.get_text_embedding("sample")
             d = len(sample_embedding)
             faiss_index = faiss.IndexFlatL2(d)
@@ -147,41 +210,35 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
                 index.storage_context.persist(persist_dir=save_path)
 
         # 5. 검색기(Retriever) 및 엔진 구성
-        # 검색 범위를 좁혀 속도 향상 (similarity_top_k 조정)
         vector_retriever = index.as_retriever(similarity_top_k=10)
 
-        # 자식 노드를 찾으면 자동으로 부모 노드까지 찾아주는 재귀적 검색기 사용
         recursive_retriever = RecursiveRetriever(
             "vector",
             retriever_dict={"vector": vector_retriever},
-            node_dict=node_dict, # 부모 노드 참조를 위해 필수
+            node_dict=node_dict, 
             verbose=True
         )
 
-        # LLMRerank는 품질은 좋으나 속도가 매우 느림. 꼭 필요한 경우에만 top_n을 최소화하여 사용
         node_postprocessors = [
             SimilarityPostprocessor(similarity_cutoff=0.5),
-            LLMRerank(top_n=1) 
+            LLMRerank(top_n=2)  # 법률 선후관계 파악을 위해 top_n을 2 정도로 소폭 상향 조정 권장
         ]
 
         logger.info("단계 5: Recursive Query Engine 반환")
         return RetrieverQueryEngine.from_args(
             recursive_retriever,
             node_postprocessors=node_postprocessors,
-            streaming=False, # 중간 컨텍스트 생성을 위해 기본 스트리밍 비활성화
+            streaming=False,
             timeout=1800
         )
 
     except Exception as e:
         logger.error(f"RAG Query Engine creation failed: {e}")
         raise
-    
     finally:
-        # 6. 임시 폴더 정리 (압축 파일이었던 경우에만)
         if is_compressed and os.path.exists(temp_extract_path):
             logger.info(f"단계 6: 임시 파일 정리 중... ({temp_extract_path})")
             shutil.rmtree(temp_extract_path)
-
 
 
 
