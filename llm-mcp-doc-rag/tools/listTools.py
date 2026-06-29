@@ -96,4 +96,28 @@ def getList() -> list[types.Tool]:
                 }
             }
         ),
+
+        # ─────────────────────────────────────
+        # 문서 변환 (HTML/PDF -> Markdown)
+        # ─────────────────────────────────────
+        types.Tool(
+            name="convert_to_markdown",
+            description=(
+                "HTML 또는 PDF 파일을 Markdown 텍스트로 변환하는 도구입니다.\n"
+                "  - 사용자가 업로드한 공고문, 문서 파일(.html, .htm, .pdf)의 내용을 분석하기 전,"
+                " 텍스트 형태로 추출해야 할 때 사용합니다.\n"
+                "  - 'file_path'는 서버에서 접근 가능한 절대/상대 경로여야 합니다.\n"
+                "  - 지원하지 않는 확장자인 경우 실패 상태(status='failed')와 에러 메시지를 반환합니다."
+            ),
+            inputSchema={
+                "type": "object",
+                "required": ["file_path"],
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "변환할 파일의 경로 (.html, .htm, .pdf 지원)"
+                    }
+                }
+            }
+        ),
     ]

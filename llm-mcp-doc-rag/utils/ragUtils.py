@@ -462,7 +462,7 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
         # TODO: FlagEmbeddingReranker를 사용하여 검색속도를 상승시키는 것이 유의미 한지 검증 필요. LLMRerank는 품질은 좋으나 속도가 매우 느림. 꼭 필요한 경우에만 top_n을 최소화하여 사용
         node_postprocessors = [
             SimilarityPostprocessor(similarity_cutoff=0.5),
-            LLMRerank(top_n=1) 
+            LLMRerank(top_n=2) 
         ]
         
 
@@ -471,7 +471,7 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
             recursive_retriever,
             node_postprocessors=node_postprocessors,
             streaming=False,
-            timeout=1800
+            timeout=600
         )
 
     except Exception as e:

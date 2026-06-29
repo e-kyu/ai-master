@@ -20,7 +20,7 @@ from langchain_core.tools import tool
 from llama_index.core import Settings
 from llama_index.core.node_parser import SentenceSplitter
 
-from tools import listTools, docAnalyze, ragWebsite
+from tools import listTools, docAnalyze, ragWebsite, convertToMarkdown
 
 logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
 app = Server("mcp-server")
@@ -146,13 +146,38 @@ async def qna_agent(**kwargs):
 
 
 
+class ConvertToMarkdownInput(BaseModel):
+    """
+    문서 기반 질의응답 도구 입력 스키마
+    """
+    file_path: str = Field(
+        default="",
+        description="분석 대상 문서의 절대 경로"
+    )
+
+@tool(
+    args_schema=ConvertToMarkdownInput,
+    description="HTML 또는 PDF 파일을 Markdown 텍스트로 변환하는 도구"
+)
+async def convert_to_markdown(**kwargs):
+    """문서 분석 기반 질의응답"""
+
+    try:
+        args = ConvertToMarkdownInput(**kwargs)
+    except Exception as e:
+        logger.error(f"Invalid input for convert_to_markdown: {e}")
+        raise ValueError("Invalid input for convert_to_markdown. Please check the provided arguments.")
+
+    return convertToMarkdown.execute(args.file_path)
+
+
 # =====================================================
 # 2. Tool Registry (중앙 매핑)
 # =====================================================
 TOOL_REGISTRY = {
     "QnA_doc": qna_doc,
     "QnA_agent": qna_agent,
-   # "QnA_web_search": qna_web_search,
+    "convert_to_markdown": convert_to_markdown,
 }
 
 
@@ -237,7 +262,7 @@ if __name__ == "__main__":
     Settings.embed_model = config.settings.get_embeddings()
 
     # 문서를 자르는 단위(Chunk) 설정: 800자 단위로 자르고 100자씩 겹치게 함
-    Settings.node_parser = SentenceSplitter(chunk_size=800, chunk_overlap=100)
+    # Settings.node_parser = SentenceSplitter(chunk_size=800, chunk_overlap=100)
 
     agent_infos = []
     agent_infos.append({"mode":"PpsGeneralServiceAgent", "name":"조달청 일반용역 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsGeneralServiceAgentGuide.zip;./llm-mcp-doc-rag/resource/agent/PpsGeneralServiceAgent.zip;"})
