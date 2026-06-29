@@ -270,3 +270,52 @@ def get_mcp_manager():
     MCPClientManager 인스턴스를 생성하여 반환하는 함수
     """
     return MCPClientManager()
+
+
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+def call_tool(sse_client_addr, payload):
+    # sse_client와 ClientSession은 async context manager이므로
+    # 내부 비동기 로직을 정의한 뒤 asyncio.run으로 동기 실행한다.
+    async def _call_tool_async():
+        try:
+            async with sse_client(sse_client_addr) as streams:
+                async with ClientSession(streams[0], streams[1]) as session:
+                    try:
+                        await session.initialize()
+                        # 세션이 초기화될 수 있도록 잠시 대기
+                        await asyncio.sleep(SESSION_INIT_WAIT)
+                        logger.info("세션 초기화 완료")
+
+                        tool_name = payload["tool"]
+                        tool_args = payload["input"]
+
+                        try:
+                            # MCP 세션을 통해 도구 호출
+                            tool_response = await session.call_tool(tool_name, tool_args)
+
+                            return {
+                                "status": "success",
+                                "response": tool_response.content[0].text,
+                            }
+
+                        except Exception as err:
+                            return {
+                                "status": "failed",
+                                "error_message": f"도구 호출 중 오류 발생: {str(err)}",
+                            }
+
+                    except Exception as err:
+                        return {
+                            "status": "failed",
+                            "error_message": f"MCP 세션 초기화 중 오류 발생: {str(err)}",
+                        }
+        except Exception as err:
+            return {
+                "status": "failed",
+                "error_message": f"SSE 연결 또는 세션 생성 중 오류 발생: {str(err)}",
+            }
+
+    return asyncio.run(_call_tool_async())
+    
