@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAppState } from "../context/appStateStore"
 import { uploadFile } from "../api/upload"
 import { analyzeNotice } from "../api/qna"
@@ -11,12 +11,36 @@ import type { NoticeScanResult } from "../types"
 type Status = "idle" | "uploading" | "analyzing" | "done" | "error"
 
 export function NoticeScanAgentPage() {
-  const { selectedAgent, convrstnId } = useAppState()
+  const { selectedAgent, convrstnId, messages, refreshHistory } = useAppState()
   const [status, setStatus] = useState<Status>("idle")
   const [fileName, setFileName] = useState<string | null>(null)
   const [result, setResult] = useState<NoticeScanResult | null>(null)
   const [statusMessage, setStatusMessage] = useState("파일을 선택하면 자동으로 분석을 시작합니다.")
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // convrstnId 변경 시(신규 또는 이력 복원) 상태 동기화
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (messages.length === 0) {
+      setStatus("idle")
+      setFileName(null)
+      setResult(null)
+      setStatusMessage("파일을 선택하면 자동으로 분석을 시작합니다.")
+      return
+    }
+    const last = messages[messages.length - 1]
+    if (!last.answer) return
+    try {
+      const parsed = JSON.parse(last.answer) as NoticeScanResult
+      const name = last.question.split(/[/\\]/).pop() ?? last.question
+      setFileName(name)
+      setResult(parsed)
+      setStatus("done")
+      setStatusMessage("이전 분석 결과를 불러왔습니다.")
+    } catch {
+      // answer가 JSON이 아닌 경우(PpsAssist 이력 등) 무시
+    }
+  }, [convrstnId]) // messages는 convrstnId와 함께 원자적으로 변경되므로 의존성 제외
 
   if (!selectedAgent) return null
 
@@ -55,6 +79,7 @@ export function NoticeScanAgentPage() {
       setResult(res)
       setStatus("done")
       setStatusMessage("분석 결과가 아래에 표시됩니다.")
+      refreshHistory()
     } catch {
       setStatus("error")
       setStatusMessage("API 요청 오류: 분석에 실패했습니다.")

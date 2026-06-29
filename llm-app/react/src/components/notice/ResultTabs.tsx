@@ -1,4 +1,5 @@
 import { useState } from "react"
+import ReactMarkdown from "react-markdown"
 import { ItemsTable } from "./ItemsTable"
 import type { NoticeExecutionInfo, NoticeGeneralInfo, NoticeItem, NoticeScanResult } from "../../types"
 
@@ -52,7 +53,7 @@ function extraEntries<T extends Record<string, unknown>>(obj: T, known: (keyof T
 export function ResultTabs({ general, execution, items, data, raw }: Props) {
   const hasProgress = (raw.extracted_data?.progresses?.length ?? 0) > 0 || (raw.extracted_data?.statuses?.length ?? 0) > 0
 
-  const tabs = ["상세정보", "품목", ...(hasProgress ? ["진행현황"] : []), "원문", "자동입력JSON"] as const
+  const tabs = ["상세정보", "품목", ...(hasProgress ? ["진행현황"] : []), "원문", "자동입력 항목"] as const
   type Tab = (typeof tabs)[number]
   const [active, setActive] = useState<Tab>("상세정보")
   const [copyStatus, setCopyStatus] = useState<string | null>(null)
@@ -163,12 +164,12 @@ export function ResultTabs({ general, execution, items, data, raw }: Props) {
         )}
 
         {active === "원문" && (
-          <div className="max-h-[480px] overflow-auto rounded-xl bg-zinc-50 p-4 text-sm whitespace-pre-wrap text-zinc-700">
-            {raw.document_text || "원문 텍스트가 없습니다."}
+          <div className="max-h-[480px] overflow-auto rounded-xl bg-zinc-50 p-4 text-sm text-zinc-700">
+            <ReactMarkdown>{raw.document_text || "원문 텍스트가 없습니다."}</ReactMarkdown>
           </div>
         )}
 
-        {active === "자동입력JSON" && (
+        {active === "자동입력 항목" && (
           <div>
             
             <div className="mb-2 flex items-center justify-between">
