@@ -236,6 +236,14 @@ export function ExtractionDashboard({ result, fileName }: Props) {
   const [filter, setFilter] = useState<FilterMode>("all")
   const [selectedField, setSelectedField] = useState<string | null>(null)
   const [panelTab, setPanelTab] = useState<PanelTab>("result")
+  const [copied, setCopied] = useState(false)
+
+  const handleCopyJson = () => {
+    navigator.clipboard.writeText(JSON.stringify(result.extracted_data, null, 2)).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    })
+  }
 
   const fields = useMemo(() => flattenFields(result), [result])
   const okCount = fields.filter((f) => f.status === "ok").length
@@ -370,6 +378,14 @@ export function ExtractionDashboard({ result, fileName }: Props) {
                 <span style={{ fontSize: 11, color: "#8A93A6", flexShrink: 0 }}>
                   추출률 <b style={{ color: "#0B7C56", fontFamily: "'IBM Plex Mono', monospace" }}>{total > 0 ? Math.round((okCount / total) * 100) : 0}%</b>
                 </span>
+              </div>
+            )}
+            
+            {viewMode === "json" && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={handleCopyJson} style={chip(copied, "#161A22", "#161A22", "#fff")}>{copied ? "복사됨" : "클립보드 복사"}</button>
+                </div>
               </div>
             )}
           </div>
