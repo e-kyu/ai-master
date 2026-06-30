@@ -30,6 +30,28 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---- Dashboard animations ---- */
+@keyframes dotPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 159, 110, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(14, 159, 110, 0); }
+}
+@keyframes ringPulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 87, 213, 0.32); }
+  70%, 100% { box-shadow: 0 0 0 9px rgba(52, 87, 213, 0); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pipelineFlow {
+  0% { background-position: 0 0; }
+  100% { background-position: 22px 0; }
+}
+@keyframes floatUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 * {
   scrollbar-width: thin;
 }

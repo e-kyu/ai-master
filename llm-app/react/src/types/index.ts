@@ -104,3 +104,12 @@ export interface NoticeScanResult {
   error_message?: string | null
   [key: string]: unknown
 }
+
+export interface AgentProgressEvent {
+  type: "progress" | "result"
+  step?: string
+  label?: string
+  message?: string
+  status?: "running" | "done" | "failed"
+  data?: NoticeScanResult
+}
