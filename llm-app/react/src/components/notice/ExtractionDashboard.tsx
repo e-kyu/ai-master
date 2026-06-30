@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { ItemsTable } from "./ItemsTable"
 import type { NoticeScanResult } from "../../types"
+import { useIsMobile } from "../../hooks/useIsMobile"
 
 // ─── Field definitions ───────────────────────────────────────────────────────
 
@@ -178,35 +179,40 @@ function JsonLine({ depth, k, v, comma }: { depth: number; k?: string; v: JsonVa
 // ─── Donut summary ───────────────────────────────────────────────────────────
 
 function DonutSummary({ ok, review, total }: { ok: number; review: number; total: number }) {
-  const r = 30
+  const isMobile = useIsMobile()
+  const size = isMobile ? 52 : 72
+  const r = isMobile ? 20 : 30
+  const sw = isMobile ? 6 : 8
   const C = 2 * Math.PI * r
   const pct = total > 0 ? ok / total : 0
   const dash = `${(pct * C).toFixed(1)} ${C.toFixed(1)}`
+  const cx = size / 2
+  const cy = size / 2
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-      <div style={{ position: "relative", width: 72, height: 72, flexShrink: 0 }}>
-        <svg width="72" height="72" viewBox="0 0 72 72">
-          <circle cx="36" cy="36" r={r} fill="none" stroke="#EBEEF3" strokeWidth="8" />
-          <circle cx="36" cy="36" r={r} fill="none" stroke="#0E9F6E" strokeWidth="8" strokeLinecap="round" strokeDasharray={dash} transform="rotate(-90 36 36)" />
+    <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 16 }}>
+      <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#EBEEF3" strokeWidth={sw} />
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#0E9F6E" strokeWidth={sw} strokeLinecap="round" strokeDasharray={dash} transform={`rotate(-90 ${cx} ${cy})`} />
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>
-          <span style={{ fontSize: 17, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace" }}>{Math.round(pct * 100)}%</span>
-          <span style={{ fontSize: 9.5, color: "#8A93A6", marginTop: 2 }}>추출률</span>
+          <span style={{ fontSize: isMobile ? 12 : 17, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace" }}>{Math.round(pct * 100)}%</span>
+          {!isMobile && <span style={{ fontSize: 9.5, color: "#8A93A6", marginTop: 2 }}>추출률</span>}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <div style={{ minWidth: 72, padding: "9px 13px", borderRadius: 9, background: "#F4F8FF", border: "1px solid #E2E9F8" }}>
-          <div style={{ fontSize: 11, color: "#5B6577", marginBottom: 3 }}>전체 항목</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace" }}>{total}</div>
+      <div style={{ display: "flex", gap: isMobile ? 5 : 8 }}>
+        <div style={{ minWidth: isMobile ? 50 : 72, padding: isMobile ? "6px 10px" : "9px 13px", borderRadius: 9, background: "#F4F8FF", border: "1px solid #E2E9F8" }}>
+          <div style={{ fontSize: isMobile ? 10 : 11, color: "#5B6577", marginBottom: 2 }}>{isMobile ? "전체" : "전체 항목"}</div>
+          <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace" }}>{total}</div>
         </div>
-        <div style={{ minWidth: 72, padding: "9px 13px", borderRadius: 9, background: "#E9F7F0", border: "1px solid #C7E9D8" }}>
-          <div style={{ fontSize: 11, color: "#0B7C56", marginBottom: 3 }}>추출 완료</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: "#0B7C56" }}>{ok}</div>
+        <div style={{ minWidth: isMobile ? 50 : 72, padding: isMobile ? "6px 10px" : "9px 13px", borderRadius: 9, background: "#E9F7F0", border: "1px solid #C7E9D8" }}>
+          <div style={{ fontSize: isMobile ? 10 : 11, color: "#0B7C56", marginBottom: 2 }}>{isMobile ? "완료" : "추출 완료"}</div>
+          <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: "#0B7C56" }}>{ok}</div>
         </div>
-        <div style={{ minWidth: 72, padding: "9px 13px", borderRadius: 9, background: "#FCF2E3", border: "1px solid #F0D8AE" }}>
-          <div style={{ fontSize: 11, color: "#B5701A", marginBottom: 3 }}>검토 필요</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: "#C2410C" }}>{review}</div>
+        <div style={{ minWidth: isMobile ? 50 : 72, padding: isMobile ? "6px 10px" : "9px 13px", borderRadius: 9, background: "#FCF2E3", border: "1px solid #F0D8AE" }}>
+          <div style={{ fontSize: isMobile ? 10 : 11, color: "#B5701A", marginBottom: 2 }}>{isMobile ? "검토" : "검토 필요"}</div>
+          <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 700, fontFamily: "'IBM Plex Mono', monospace", color: "#C2410C" }}>{review}</div>
         </div>
       </div>
     </div>
@@ -222,11 +228,14 @@ interface Props {
 
 type FilterMode = "all" | "ok" | "review"
 type ViewMode = "fields" | "json"
+type PanelTab = "doc" | "result"
 
 export function ExtractionDashboard({ result, fileName }: Props) {
+  const isMobile = useIsMobile()
   const [viewMode, setViewMode] = useState<ViewMode>("fields")
   const [filter, setFilter] = useState<FilterMode>("all")
   const [selectedField, setSelectedField] = useState<string | null>(null)
+  const [panelTab, setPanelTab] = useState<PanelTab>("result")
 
   const fields = useMemo(() => flattenFields(result), [result])
   const okCount = fields.filter((f) => f.status === "ok").length
@@ -268,111 +277,142 @@ export function ExtractionDashboard({ result, fileName }: Props) {
       : { background: "#fff", border: "1px solid #E6E9EF", color: "#5B6577" }),
   } as React.CSSProperties)
 
+  const panelTabStyle = (active: boolean) => ({
+    flex: 1,
+    padding: "11px 0",
+    fontSize: 13,
+    fontWeight: active ? 700 : 500,
+    color: active ? "#3457D5" : "#8A93A6",
+    background: "none",
+    border: "none",
+    borderBottom: active ? "2px solid #3457D5" : "2px solid transparent",
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "color .15s",
+  } as React.CSSProperties)
+
+  const showDoc = !isMobile || panelTab === "doc"
+  const showResult = !isMobile || panelTab === "result"
+
   return (
-    <div style={{ display: "flex", height: "100%", minHeight: 0, gap: 12, padding: 12, background: "#F4F6F9" }}>
+    <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", height: "100%", minHeight: 0, gap: isMobile ? 0 : 12, padding: isMobile ? 0 : 12, background: "#F4F6F9" }}>
+
+      {/* Mobile panel tab switcher */}
+      {isMobile && (
+        <div style={{ flexShrink: 0, display: "flex", background: "#fff", borderBottom: "1px solid #E6E9EF", padding: "0 14px" }}>
+          <button onClick={() => setPanelTab("doc")} style={panelTabStyle(panelTab === "doc")}>원본 문서</button>
+          <button onClick={() => setPanelTab("result")} style={panelTabStyle(panelTab === "result")}>추출 결과</button>
+        </div>
+      )}
 
       {/* ── LEFT: original document ── */}
-      <section style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", background: "#fff", border: "1px solid #E6E9EF", borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", borderBottom: "1px solid #EEF0F4" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6577" strokeWidth="2"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M5 21V5a2 2 0 0 1 2-2h8l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /></svg>
-            <span style={{ fontSize: 13.5, fontWeight: 700 }}>원본 비축공고서</span>
-            <span style={{ fontSize: 11, color: "#9AA3B2", fontFamily: "'IBM Plex Mono', monospace" }}>{fileName}</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 13, fontSize: 11, color: "#5B6577" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 11, height: 11, borderRadius: 3, background: "#EAF0FE", boxShadow: "inset 0 -2px 0 #A9C0F2", display: "inline-block" }} />
-              추출됨
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-              <span style={{ width: 11, height: 11, borderRadius: 3, background: "#FCF1E0", boxShadow: "inset 0 -2px 0 #EBB765", display: "inline-block" }} />
-              검토 필요
-            </span>
-          </div>
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "20px 28px", background: "#EEF1F5" }}>
-          {docText ? (
-            <div style={{ background: "#fff", borderRadius: 8, padding: "28px 32px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", fontSize: 14, lineHeight: 1.8, color: "#1A1F29", minHeight: 300 }}>
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{docText}</ReactMarkdown>
+      {showDoc && (
+        <section style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", background: "#fff", border: isMobile ? "none" : "1px solid #E6E9EF", borderRadius: isMobile ? 0 : 12, overflow: "hidden" }}>
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", padding: isMobile ? "10px 14px" : "12px 16px", borderBottom: "1px solid #EEF0F4" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6577" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M5 21V5a2 2 0 0 1 2-2h8l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /></svg>
+              <span style={{ fontSize: 13.5, fontWeight: 700 }}>원본 비축공고서</span>
+              {!isMobile && <span style={{ fontSize: 11, color: "#9AA3B2", fontFamily: "'IBM Plex Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
+            </div>
+            {!isMobile && (
+              <div style={{ display: "flex", alignItems: "center", gap: 13, fontSize: 11, color: "#5B6577", flexShrink: 0 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 3, background: "#EAF0FE", boxShadow: "inset 0 -2px 0 #A9C0F2", display: "inline-block" }} />
+                  추출됨
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 3, background: "#FCF1E0", boxShadow: "inset 0 -2px 0 #EBB765", display: "inline-block" }} />
+                  검토 필요
+                </span>
               </div>
-            </div>
-          ) : (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9AA3B2", fontSize: 13 }}>
-              원문 텍스트가 없습니다.
-            </div>
-          )}
-        </div>
-      </section>
+            )}
+          </div>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isMobile ? "14px 14px" : "20px 28px", background: "#EEF1F5" }}>
+            {docText ? (
+              <div style={{ background: "#fff", borderRadius: 8, padding: isMobile ? "16px 16px" : "28px 32px", boxShadow: "0 1px 4px rgba(0,0,0,.06)", fontSize: 14, lineHeight: 1.8, color: "#1A1F29", minHeight: 200 }}>
+                <div className="prose prose-sm max-w-none">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{docText}</ReactMarkdown>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#9AA3B2", fontSize: 13 }}>
+                원문 텍스트가 없습니다.
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── RIGHT: extraction result ── */}
-      <section style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", background: "#fff", border: "1px solid #E6E9EF", borderRadius: 12, overflow: "hidden" }}>
+      {showResult && (
+        <section style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", background: "#fff", border: isMobile ? "none" : "1px solid #E6E9EF", borderRadius: isMobile ? 0 : 12, overflow: "hidden" }}>
 
-        {/* Panel header */}
-        <div style={{ flexShrink: 0, padding: "12px 16px", borderBottom: "1px solid #EEF0F4" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: viewMode === "fields" ? 11 : 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3457D5" strokeWidth="2"><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>
-              <span style={{ fontSize: 13.5, fontWeight: 700 }}>추출 결과 (Structured Output)</span>
+          {/* Panel header */}
+          <div style={{ flexShrink: 0, padding: isMobile ? "10px 14px" : "12px 16px", borderBottom: "1px solid #EEF0F4" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: viewMode === "fields" ? 11 : 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3457D5" strokeWidth="2" style={{ flexShrink: 0 }}><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>
+                <span style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700 }}>{isMobile ? "추출 결과" : "추출 결과 (Structured Output)"}</span>
+              </div>
+              <div style={{ display: "flex", padding: 3, background: "#F1F3F7", borderRadius: 8, gap: 2, flexShrink: 0 }}>
+                <button onClick={() => setViewMode("fields")} style={seg(viewMode === "fields")}>필드</button>
+                <button onClick={() => setViewMode("json")} style={seg(viewMode === "json")}>JSON</button>
+              </div>
             </div>
-            <div style={{ display: "flex", padding: 3, background: "#F1F3F7", borderRadius: 8, gap: 2 }}>
-              <button onClick={() => setViewMode("fields")} style={seg(viewMode === "fields")}>필드</button>
-              <button onClick={() => setViewMode("json")} style={seg(viewMode === "json")}>JSON</button>
-            </div>
+
+            {viewMode === "fields" && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => setFilter("all")} style={chip(filter === "all", "#161A22", "#161A22", "#fff")}>전체 {total}</button>
+                  <button onClick={() => setFilter("ok")} style={chip(filter === "ok", "#E9F7F0", "#C7E9D8", "#0B7C56")}>완료 {okCount}</button>
+                  <button onClick={() => setFilter("review")} style={chip(filter === "review", "#FCF2E3", "#F0D8AE", "#C2410C")}>{isMobile ? "검토" : "처리 필요"} {reviewCount}</button>
+                </div>
+                <span style={{ fontSize: 11, color: "#8A93A6", flexShrink: 0 }}>
+                  추출률 <b style={{ color: "#0B7C56", fontFamily: "'IBM Plex Mono', monospace" }}>{total > 0 ? Math.round((okCount / total) * 100) : 0}%</b>
+                </span>
+              </div>
+            )}
           </div>
 
+          {/* Field cards */}
           {viewMode === "fields" && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ display: "flex", gap: 7 }}>
-                <button onClick={() => setFilter("all")} style={chip(filter === "all", "#161A22", "#161A22", "#fff")}>전체 {total}</button>
-                <button onClick={() => setFilter("ok")} style={chip(filter === "ok", "#E9F7F0", "#C7E9D8", "#0B7C56")}>완료 {okCount}</button>
-                <button onClick={() => setFilter("review")} style={chip(filter === "review", "#FCF2E3", "#F0D8AE", "#C2410C")}>처리 필요 {reviewCount}</button>
-              </div>
-              <span style={{ fontSize: 11, color: "#8A93A6" }}>
-                추출률 <b style={{ color: "#0B7C56", fontFamily: "'IBM Plex Mono', monospace" }}>{total > 0 ? Math.round((okCount / total) * 100) : 0}%</b>
-              </span>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isMobile ? "10px 12px" : "12px 14px", display: "flex", flexDirection: "column", gap: 9, background: "#FAFBFC" }}>
+              {shownFields.map((f) => (
+                <FieldCard
+                  key={f.key}
+                  field={f}
+                  selected={selectedField === f.key}
+                  onSelect={() => setSelectedField((prev) => (prev === f.key ? null : f.key))}
+                />
+              ))}
+
+              {/* Items section */}
+              {filter === "all" && items.length > 0 && (
+                <div style={{ marginTop: 8, border: "1px solid #E6E9EF", borderRadius: 10, background: "#fff", padding: "12px 14px", animation: "floatUp .22s ease both" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#161A22" }}>품목 목록</span>
+                    <span style={{ fontSize: 11, background: "#EAF0FE", color: "#3457D5", border: "1px solid #C8D6F7", borderRadius: 20, padding: "2px 8px", fontWeight: 600 }}>{items.length}개</span>
+                  </div>
+                  <ItemsTable items={items} />
+                </div>
+              )}
+
+              {shownFields.length === 0 && (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 120, color: "#9AA3B2", fontSize: 13 }}>
+                  해당하는 항목이 없습니다.
+                </div>
+              )}
             </div>
           )}
-        </div>
 
-        {/* Field cards */}
-        {viewMode === "fields" && (
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9, background: "#FAFBFC" }}>
-            {shownFields.map((f) => (
-              <FieldCard
-                key={f.key}
-                field={f}
-                selected={selectedField === f.key}
-                onSelect={() => setSelectedField((prev) => (prev === f.key ? null : f.key))}
-              />
-            ))}
-
-            {/* Items section */}
-            {filter === "all" && items.length > 0 && (
-              <div style={{ marginTop: 8, border: "1px solid #E6E9EF", borderRadius: 10, background: "#fff", padding: "12px 14px", animation: "floatUp .22s ease both" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 10 }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#161A22" }}>품목 목록</span>
-                  <span style={{ fontSize: 11, background: "#EAF0FE", color: "#3457D5", border: "1px solid #C8D6F7", borderRadius: 20, padding: "2px 8px", fontWeight: 600 }}>{items.length}개</span>
-                </div>
-                <ItemsTable items={items} />
-              </div>
-            )}
-
-            {shownFields.length === 0 && (
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 120, color: "#9AA3B2", fontSize: 13 }}>
-                해당하는 항목이 없습니다.
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* JSON view */}
-        {viewMode === "json" && (
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "16px 18px", background: "#FBFCFD", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, lineHeight: 1.85 }}>
-            <JsonLine depth={0} v={result.extracted_data as JsonVal} comma={false} />
-          </div>
-        )}
-      </section>
+          {/* JSON view */}
+          {viewMode === "json" && (
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: isMobile ? "12px 14px" : "16px 18px", background: "#FBFCFD", fontFamily: "'IBM Plex Mono', monospace", fontSize: isMobile ? 11.5 : 12.5, lineHeight: 1.85 }}>
+              <JsonLine depth={0} v={result.extracted_data as JsonVal} comma={false} />
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }

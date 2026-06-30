@@ -6,6 +6,7 @@ import { Spinner } from "../components/common/Spinner"
 import { PipelineStrip, type PipelineStep, type StepStatus } from "../components/notice/PipelineStrip"
 import { DonutSummary, ExtractionDashboard } from "../components/notice/ExtractionDashboard"
 import type { AgentProgressEvent, NoticeScanResult } from "../types"
+import { useIsMobile } from "../hooks/useIsMobile"
 
 type PageStatus = "idle" | "uploading" | "analyzing" | "done" | "error"
 
@@ -47,8 +48,8 @@ function computePipeline(pageStatus: PageStatus, progressSteps: ProgressStep[]):
 
   return [
     { label: "업로드",   sub: "공고서 파일",       status: uploadStatus },
-    { label: "문서 변환", sub: "레이아웃 · OCR",   status: convertStatus },
-    { label: "정보 추출", sub: "Structured Output", status: extractStatus },
+    { label: "문서 변환", sub: "Convert Markdown",   status: convertStatus },
+    { label: "정보 추출", sub: "시스템 입력 양식", status: extractStatus },
     { label: "완료",      sub: "분석 결과 확인",    status: doneStatus },
   ]
 }
@@ -66,16 +67,17 @@ function UploadZone({
   errorMsg: string
   onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void
 }) {
+  const isMobile = useIsMobile()
   const isLoading = pageStatus === "uploading" || pageStatus === "analyzing"
   const fileRef = useRef<HTMLInputElement>(null)
 
   return (
-    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9" }}>
-      <div style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: 20, border: "1px solid #E6E9EF", boxShadow: "0 2px 16px rgba(20,26,34,.07)", padding: "40px 36px" }}>
+    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9", padding: isMobile ? "16px 12px" : 24 }}>
+      <div style={{ width: "100%", maxWidth: 520, background: "#fff", borderRadius: isMobile ? 16 : 20, border: "1px solid #E6E9EF", boxShadow: "0 2px 16px rgba(20,26,34,.07)", padding: isMobile ? "24px 20px" : "40px 36px" }}>
 
         {/* Brand header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#161A22", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 16, letterSpacing: "-.5px" }}>V</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: isMobile ? 20 : 28 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#161A22", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 16, letterSpacing: "-.5px", flexShrink: 0 }}>V</div>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-.2px", color: "#161A22" }}>비축공고서 추출 엔진</div>
             <div style={{ fontSize: 11.5, color: "#8A93A6" }}>Structured Output Agent · v2.4</div>
@@ -93,7 +95,7 @@ function UploadZone({
             borderRadius: 14,
             border: `2px dashed ${isLoading ? "#3457D5" : "#D0D5DF"}`,
             background: isLoading ? "#F4F7FE" : "#FAFBFC",
-            padding: "40px 24px",
+            padding: isMobile ? "28px 16px" : "40px 24px",
             cursor: isLoading ? "default" : "pointer",
             transition: "border-color .2s, background .2s",
           }}
@@ -142,14 +144,16 @@ function UploadZone({
 // ─── Analyzing overlay (pipeline strip + progress) ────────────────────────────
 
 function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressStep[]; pipeline: PipelineStep[] }) {
+  const isMobile = useIsMobile()
+
   return (
-    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9", padding: 24 }}>
-      <div style={{ width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9", padding: isMobile ? 14 : 24 }}>
+      <div style={{ width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 14 }}>
 
         {/* Live pipeline mini view */}
-        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E6E9EF", padding: "18px 20px" }}>
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E6E9EF", padding: isMobile ? "14px 16px" : "18px 20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#0E9F6E", animation: "dotPulse 1.6s ease-out infinite", display: "inline-block" }} />
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#0E9F6E", animation: "dotPulse 1.6s ease-out infinite", display: "inline-block", flexShrink: 0 }} />
             <span style={{ fontSize: 13, fontWeight: 700, color: "#161A22" }}>추출 엔진 가동 중</span>
           </div>
 
@@ -184,12 +188,12 @@ function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressSte
         </div>
 
         {/* Pipeline steps summary */}
-        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E6E9EF", padding: "14px 18px" }}>
+        <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E6E9EF", padding: isMobile ? "12px 14px" : "14px 18px" }}>
           <div style={{ fontSize: 11, color: "#8A93A6", marginBottom: 10 }}>처리 단계</div>
-          <div style={{ display: "flex", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", overflowX: "auto" }}>
             {pipeline.map((step, i) => (
               <div key={step.label} style={{ display: "flex", alignItems: "center", flex: i < pipeline.length - 1 ? "auto" : "none" }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, width: 68 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, width: isMobile ? 60 : 68, flexShrink: 0 }}>
                   <div style={{
                     width: 24, height: 24, borderRadius: "50%",
                     background: step.status === "done" ? "#E3F6EE" : step.status === "running" ? "#EAF0FE" : "#F1F3F7",
@@ -204,10 +208,10 @@ function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressSte
                       <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#CDD2DB" }} />
                     )}
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: step.status === "running" ? "#3457D5" : "#8A93A6", textAlign: "center", whiteSpace: "nowrap" }}>{step.label}</span>
+                  <span style={{ fontSize: isMobile ? 9.5 : 10, fontWeight: 600, color: step.status === "running" ? "#3457D5" : "#8A93A6", textAlign: "center", whiteSpace: "nowrap" }}>{step.label}</span>
                 </div>
                 {i < pipeline.length - 1 && (
-                  <div style={{ flex: 1, height: 2, minWidth: 8, marginBottom: 16, background: step.status === "done" ? "#D7F0E4" : "#E6E9EF" }} />
+                  <div style={{ flex: 1, height: 2, minWidth: 6, marginBottom: 16, background: step.status === "done" ? "#D7F0E4" : "#E6E9EF" }} />
                 )}
               </div>
             ))}
@@ -222,6 +226,7 @@ function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressSte
 
 export function NoticeScanAgentPage() {
   const { selectedAgent, convrstnId, messages, refreshHistory } = useAppState()
+  const isMobile = useIsMobile()
   const [pageStatus, setPageStatus] = useState<PageStatus>("idle")
   const [fileName, setFileName] = useState<string | null>(null)
   const [result, setResult] = useState<NoticeScanResult | null>(null)
@@ -308,50 +313,77 @@ export function NoticeScanAgentPage() {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "#F4F6F9", fontFamily: "Pretendard, system-ui, sans-serif", color: "#161A22", WebkitFontSmoothing: "antialiased" }}>
 
       {/* ── Top header bar ── */}
-      <header style={{ flexShrink: 0, background: "#FFFFFF", borderBottom: "1px solid #E6E9EF", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 22px", height: 56 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 8, background: "#161A22", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 13 }}>V</div>
-          <div style={{ lineHeight: 1.25 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 700, letterSpacing: "-.2px" }}>비축공고서 추출 엔진</div>
-            <div style={{ fontSize: 11, color: "#8A93A6" }}>Structured Output Agent · v2.4</div>
-          </div>
-          {fileName && (
-            <div style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: 8, padding: "5px 11px", background: "#F4F6F9", border: "1px solid #E6E9EF", borderRadius: 7 }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5B6577" strokeWidth="2"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M5 21V5a2 2 0 0 1 2-2h8l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /></svg>
-              <span style={{ fontSize: 11.5, fontFamily: "'IBM Plex Mono', monospace", color: "#5B6577" }}>{fileName}</span>
+      <header style={{ flexShrink: 0, background: "#FFFFFF", borderBottom: "1px solid #E6E9EF", padding: isMobile ? "10px 14px" : "0 22px" }}>
+
+        {/* Main row */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: isMobile ? "auto" : 56, gap: 10 }}>
+
+          {/* Left: logo + title */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 10 : 14, minWidth: 0 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: "#161A22", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 13, flexShrink: 0 }}>V</div>
+            <div style={{ lineHeight: 1.25, minWidth: 0 }}>
+              <div style={{ fontSize: isMobile ? 12.5 : 13.5, fontWeight: 700, letterSpacing: "-.2px", whiteSpace: "nowrap" }}>비축공고서 추출 엔진</div>
+              {!isMobile && <div style={{ fontSize: 11, color: "#8A93A6" }}>Structured Output Agent · v2.4</div>}
             </div>
-          )}
+            {/* FileName badge — desktop only in header row */}
+            {!isMobile && fileName && (
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginLeft: 8, padding: "5px 11px", background: "#F4F6F9", border: "1px solid #E6E9EF", borderRadius: 7 }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5B6577" strokeWidth="2"><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M5 21V5a2 2 0 0 1 2-2h8l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /></svg>
+                <span style={{ fontSize: 11.5, fontFamily: "'IBM Plex Mono', monospace", color: "#5B6577" }}>{fileName}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Right: status + actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 8 : 14, flexShrink: 0 }}>
+            {pageStatus === "analyzing" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "4px 10px" : "5px 13px", background: "#E3F6EE", border: "1px solid #BCEAD4", borderRadius: 20 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#0E9F6E", animation: "dotPulse 1.6s ease-out infinite", display: "inline-block", flexShrink: 0 }} />
+                <span style={{ fontSize: isMobile ? 11.5 : 12.5, fontWeight: 600, color: "#0B7C56", whiteSpace: "nowrap" }}>{isMobile ? "분석 중" : "추출 엔진 가동 중"}</span>
+              </div>
+            )}
+            {pageStatus === "done" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "4px 10px" : "5px 13px", background: "#EAF0FE", border: "1px solid #C8D6F7", borderRadius: 20 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#3457D5" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>
+                <span style={{ fontSize: isMobile ? 11.5 : 12.5, fontWeight: 600, color: "#2D4FC9", whiteSpace: "nowrap" }}>분석 완료</span>
+              </div>
+            )}
+            {/* Elapsed time — desktop: inline, mobile: in second row */}
+            {!isMobile && elapsedSec !== null && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.3 }}>
+                <span style={{ fontSize: 11.5, color: "#8A93A6" }}>처리 시간</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{elapsedSec}s</span>
+              </div>
+            )}
+            {(pageStatus === "done" || pageStatus === "error") && (
+              <button
+                onClick={reset}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: isMobile ? "6px 10px" : "6px 13px", background: "transparent", border: "1px solid #E6E9EF", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#5B6577", fontFamily: "inherit" }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-3.55" /></svg>
+                {!isMobile && "초기화"}
+              </button>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {pageStatus === "analyzing" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 13px", background: "#E3F6EE", border: "1px solid #BCEAD4", borderRadius: 20 }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#0E9F6E", animation: "dotPulse 1.6s ease-out infinite", display: "inline-block" }} />
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#0B7C56" }}>추출 엔진 가동 중</span>
-            </div>
-          )}
-          {pageStatus === "done" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 13px", background: "#EAF0FE", border: "1px solid #C8D6F7", borderRadius: 20 }}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#3457D5" strokeWidth="3"><path d="M20 6 9 17l-5-5" /></svg>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: "#2D4FC9" }}>분석 완료</span>
-            </div>
-          )}
-          {elapsedSec !== null && (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.3 }}>
-              <span style={{ fontSize: 11.5, color: "#8A93A6" }}>처리 시간</span>
-              <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{elapsedSec}s</span>
-            </div>
-          )}
-          {(pageStatus === "done" || pageStatus === "error") && (
-            <button
-              onClick={reset}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 13px", background: "transparent", border: "1px solid #E6E9EF", borderRadius: 8, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: "#5B6577", fontFamily: "inherit" }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 .49-3.55" /></svg>
-              초기화
-            </button>
-          )}
-        </div>
+        {/* Mobile second row: filename + elapsed time */}
+        {isMobile && (fileName || elapsedSec !== null) && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 10 }}>
+            {fileName && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 10px", background: "#F4F6F9", border: "1px solid #E6E9EF", borderRadius: 7, minWidth: 0, overflow: "hidden" }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#5B6577" strokeWidth="2" style={{ flexShrink: 0 }}><path d="M14 3v4a1 1 0 0 0 1 1h4" /><path d="M5 21V5a2 2 0 0 1 2-2h8l5 5v13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2z" /></svg>
+                <span style={{ fontSize: 11, fontFamily: "'IBM Plex Mono', monospace", color: "#5B6577", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>
+              </div>
+            )}
+            {elapsedSec !== null && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: "#8A93A6" }}>처리 시간</span>
+                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{elapsedSec}s</span>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* ── Pipeline strip (shown during analyzing / done) ── */}
@@ -373,10 +405,10 @@ export function NoticeScanAgentPage() {
         <ExtractionDashboard result={result!} fileName={fileName ?? ""} />
       ) : (
         /* Fallback for done but no structured data */
-        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          <div style={{ maxWidth: 640, margin: "0 auto", background: "#fff", borderRadius: 14, border: "1px solid #F0D8AE", padding: 24 }}>
+        <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 14 : 24 }}>
+          <div style={{ maxWidth: 640, margin: "0 auto", background: "#fff", borderRadius: 14, border: "1px solid #F0D8AE", padding: isMobile ? 16 : 24 }}>
             <p style={{ fontSize: 13, color: "#B5701A", marginBottom: 12 }}>⚠️ 구조화 데이터를 추출하지 못했습니다.</p>
-            <pre style={{ maxHeight: 480, overflow: "auto", background: "#1A1F29", color: "#E5E9F0", borderRadius: 10, padding: 16, fontSize: 12, lineHeight: 1.7 }}>
+            <pre style={{ maxHeight: 480, overflow: "auto", background: "#1A1F29", color: "#E5E9F0", borderRadius: 10, padding: 16, fontSize: isMobile ? 11 : 12, lineHeight: 1.7 }}>
               {JSON.stringify(result, null, 2)}
             </pre>
           </div>
