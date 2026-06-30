@@ -1,5 +1,7 @@
-from typing import Dict, Any, Optional, Literal, TypedDict
+import asyncio
+from typing import AsyncGenerator, Dict, Any, Optional, Literal, TypedDict
 from langchain_core.prompts import ChatPromptTemplate
+from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, END
 from utils import config, mcpUtils
 from agent.notice_scan_structure import ProcurementData
@@ -62,41 +64,51 @@ class PureLangNoticeScanAgent:
         return workflow.compile()
 
     def convert_to_markdown_node(self, state: AgentState) -> Dict[str, Any]:
-        payload = {
+        writer = get_stream_writer()
+        writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "running", "message": "문서를 마크다운으로 변환하는 중..."})
+
+        tool_info = {
             "tool": "convert_to_markdown",
             "input": {"file_path": state["file_path"]},
         }
 
         try:
-            response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, payload)
+            response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
         except Exception as e:
+            error_message = f"Markdown 변환 도구 호출 실패: {str(e)}"
+            writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message or "변환 실패"})
             return {
                 "status": "failed",
-                "error_message": f"Markdown 변환 도구 호출 실패: {str(e)}",
+                "error_message": error_message,
             }
 
         document_text = response.get("response") if isinstance(response, dict) else None
         if "status" in response and response["status"] == "success" and isinstance(document_text, str):
             pass
         else:
+            error_message = "변환 도구 응답이 예상한 형식이 아닙니다."
+            writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message})
             return {
                 "status": "failed",
-                "error_message": "변환 도구 응답이 예상한 형식이 아닙니다.",
+                "error_message": error_message,
             }
         if not document_text:
+            error_message = "Markdown 변환 도구가 텍스트를 반환하지 않았습니다."
+            writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message})
             return {
                 "status": "failed",
-                "error_message": "Markdown 변환 도구가 텍스트를 반환하지 않았습니다.",
+                "error_message": error_message,
             }
 
+        writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "done", "message": "변환 완료"})
         return {
             "document_text": document_text,
             "status": "success",
         }
 
     def extract_metadata_node(self, state: AgentState) -> Dict[str, Any]:
-        print("[Node: ExtractMetadata] 메타데이터 구조화 및 규정 위반 검증 중...")
-        print(state['document_text'])
+        writer = get_stream_writer()
+        writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "running", "message": "메타데이터 구조화 및 규정 위반 검증 중..."})
 
         chain = self.prompt | self.structured_llm
         try:
@@ -104,19 +116,21 @@ class PureLangNoticeScanAgent:
             data_dict = response.model_dump()
             is_violating = bool(data_dict.get("regulatory_review_notice"))
 
+            writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "done", "message": "추출 완료"})
             return {
                 "extracted_data": data_dict,
                 "is_violating": is_violating,
                 "status": "success"
             }
         except Exception as e:
+            error_message = f"구조화 데이터 생성 실패: {str(e)}"
+            writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "failed", "message": error_message or "추출 실패"})
             return {
                 "status": "failed",
-                "error_message": f"구조화 데이터 생성 실패: {str(e)}"
+                "error_message": error_message
             }
 
     def error_handling_node(self, state: AgentState) -> Dict[str, Any]:
-        print(f"[Node: ErrorHandling] 파이프라인 에러 처리 중 -> {state['error_message']}")
         return {
             "extracted_data": {
                 "error": "Pipeline Interrupted",
@@ -142,3 +156,40 @@ class PureLangNoticeScanAgent:
         }
 
         return await self.graph.ainvoke(initial_state)
+
+    async def run_stream(self, file_path: str) -> AsyncGenerator[Dict[str, Any], None]:
+        """실시간 진행상태를 SSE 이벤트로 yield하는 스트리밍 엔트리포인트"""
+        initial_state: AgentState = {
+            "file_path": file_path,
+            "file_type": None,
+            "document_text": None,
+            "extracted_data": None,
+            "is_violating": False,
+            "status": "success",
+            "error_message": None,
+        }
+
+        # Notify overall start
+        yield {"type": "progress", "step": "pipeline", "label": "파이프라인", "status": "running", "message": "파이프라인 실행 중..."}
+
+        # 컴파일된 워크플로우를 스트리밍합니다: "custom"은 get_stream_writer()를 통해 전달되는
+        # 노드 수준의 진행 이벤트를 포함하고, "values"는 각 노드 이후의 누적 상태를 담아
+        # 최종 결과에 대한 최신 스냅샷을 항상 유지합니다.
+        final_state: Dict[str, Any] = dict(initial_state)
+        try:
+            async for mode, payload in self.graph.astream(initial_state, stream_mode=["custom", "values"]):
+                if mode == "custom":
+                    yield payload
+                elif mode == "values":
+                    final_state = payload
+        except Exception as e:
+            error_message = f"파이프라인 실행 중 예외 발생: {str(e)}"
+            final_state = {
+                **final_state,
+                "status": "failed",
+                "error_message": error_message,
+                "extracted_data": {"error": "Pipeline Exception", "reason": str(e)},
+            }
+            yield {"type": "progress", "step": "pipeline", "label": "파이프라인", "status": "failed", "message": error_message}
+
+        yield {"type": "result", "data": dict(final_state)}

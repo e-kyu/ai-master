@@ -2,7 +2,7 @@ import json
 import os
 
 from datetime import datetime
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -73,31 +73,37 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
         return StreamingResponse(event_generator(), media_type="text/plain")
     elif request.agent_mode == "NoticeScanAgent":
         agent = PureLangNoticeScanAgent()
+        print("=== 순수 Lang 컴포넌트 기반 파이프라인 가동 (스트리밍) ===")
 
-        print("=== 순수 Lang 컴포넌트 기반 파이프라인 가동 ===")
-        structured = await agent.run(request.fileFullPath)
-        
-        topic = os.path.basename(request.fileFullPath)
-        if "extracted_data" in structured and "general" in structured["extracted_data"] and "noticeName" in structured["extracted_data"]["general"]:
-            topic = structured["extracted_data"]["general"]["noticeName"]
-        elif "extracted_data" in structured and "general" in structured["extracted_data"] and "refNo" in structured["extracted_data"]["general"]:
-            topic = structured["extracted_data"]["general"]["refNo"]
+        async def notice_event_generator():
+            final_state = None
+            async for event in agent.run_stream(request.fileFullPath):
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") == "result":
+                    final_state = event.get("data")
 
-        convrstn_repository.create_convrstn(request.convrstnId, {"topic": topic})
-        question_record = convrstn_repository.create_convrstn_question(
-            request.convrstnId,
-            {"context": "", "question": request.fileFullPath, "enhanced_question": ""},
-        )
+            if final_state:
+                structured = final_state
+                topic = os.path.basename(request.fileFullPath)
+                extracted = structured.get("extracted_data") or {}
+                general = extracted.get("general") or {}
+                if general.get("noticeName"):
+                    topic = general["noticeName"]
+                elif general.get("refNo"):
+                    topic = general["refNo"]
 
-        convrstn_repository.create_convrstn_answer(
-            request.convrstnId,
-            {
-                "convrstn_details_id": question_record.convrstn_details_id,
-                "answer": json.dumps(structured, ensure_ascii=False),
-                "agent_id": request.agent_id,
-            },
-        )
+                convrstn_repository.create_convrstn(request.convrstnId, {"topic": topic})
+                question_record = convrstn_repository.create_convrstn_question(
+                    request.convrstnId,
+                    {"context": "", "question": request.fileFullPath, "enhanced_question": ""},
+                )
+                convrstn_repository.create_convrstn_answer(
+                    request.convrstnId,
+                    {
+                        "convrstn_details_id": question_record.convrstn_details_id,
+                        "answer": json.dumps(structured, ensure_ascii=False),
+                        "agent_id": request.agent_id,
+                    },
+                )
 
-        response_content = json.dumps(structured, ensure_ascii=False)
-
-        return Response(content=response_content, media_type="application/json")
+        return StreamingResponse(notice_event_generator(), media_type="text/event-stream")

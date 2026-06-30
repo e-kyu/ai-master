@@ -280,7 +280,7 @@ def get_mcp_manager():
     return MCPClientManager()
 
 
-def call_tool(sse_client_addr, payload):
+def call_tool(sse_client_addr, tool_info):
     """
     동기(sync) 코드에서 MCP 도구를 한 번만 호출하고 싶을 때 사용하는 헬퍼 함수.
 
@@ -294,7 +294,7 @@ def call_tool(sse_client_addr, payload):
     async def _call_tool_async():
         try:
             async with mcp_session(sse_client_addr) as session:
-                tool_response = await session.call_tool(payload["tool"], payload["input"])
+                tool_response = await session.call_tool(tool_info["tool"], tool_info["input"])
                 return {
                     "status": "success",
                     "response": tool_response.content[0].text,
