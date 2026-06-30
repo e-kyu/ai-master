@@ -107,7 +107,7 @@ async def qna_doc(**kwargs):
 
 
 
-class QnaAgentInput(BaseModel):
+class QnaLawBaseInput(BaseModel):
     """
     문서 기반 질의응답 도구 입력 스키마
     """
@@ -130,17 +130,17 @@ class QnaAgentInput(BaseModel):
     )
 
 @tool(
-    args_schema=QnaAgentInput,
+    args_schema=QnaLawBaseInput,
     description="전문 Agent mode에 따라 기본 참조 문서 내용에 근거한 답변을 생성"
 )
-async def qna_agent(**kwargs):
+async def qna_law_base(**kwargs):
     """문서 분석 기반 질의응답"""
 
     try:
-        args = QnaAgentInput(**kwargs)
+        args = QnaLawBaseInput(**kwargs)
     except Exception as e:
-        logger.error(f"Invalid input for qna_agent: {e}")
-        raise ValueError("Invalid input for qna_agent. Please check the provided arguments.")
+        logger.error(f"Invalid input for qna_law_base: {e}")
+        raise ValueError("Invalid input for qna_law_base. Please check the provided arguments.")
 
     return await docAnalyze.execute(args.question, args.fileFullPath, args.agent_mode, args.allow_search)
 
@@ -175,9 +175,10 @@ async def convert_to_markdown(**kwargs):
 # 2. Tool Registry (중앙 매핑)
 # =====================================================
 TOOL_REGISTRY = {
-    "QnA_doc": qna_doc,
-    "QnA_agent": qna_agent,
+    "qna_doc": qna_doc,
+    "qna_law_base": qna_law_base,
     "convert_to_markdown": convert_to_markdown,
+    "qna_web_search": qna_web_search,
 }
 
 

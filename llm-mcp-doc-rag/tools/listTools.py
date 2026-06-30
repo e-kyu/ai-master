@@ -6,7 +6,7 @@ def getList() -> list[types.Tool]:
         # 문서 기반 QnA
         # ─────────────────────────────────────
         types.Tool(
-            name="QnA_doc",
+            name="qna_doc",
             description=(
                 "사용자가 첨부한 문서가 존재 하는 경우 문서를 분석하여 문서 내용에 근거한 답변을 생성한다."
                 "'파일', '경로', '문서 기반' 언급이 있는 경우"
@@ -36,7 +36,7 @@ def getList() -> list[types.Tool]:
         # 전문 Agent의 QnA
         # ─────────────────────────────────────
         types.Tool(
-            name="QnA_agent",
+            name="qna_law_base",
             description=(
                 "전문 Agent mode에 따라 기본 참조 문서 내용에 근거한 답변을 생성한다."
             ),
@@ -74,7 +74,7 @@ def getList() -> list[types.Tool]:
         # 웹 검색(RAG) 기반 QnA
         # ─────────────────────────────────────
         types.Tool(
-            name="QnA_web_search",
+            name="qna_web_search",
             description=(
                 "인터넷 검색 도구"
                 "  - 최신 정보, 일반 지식, 뉴스, 법령 변경, 외부 정보가 필요한 경우 사용합니다.\n"

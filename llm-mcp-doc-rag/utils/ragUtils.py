@@ -84,25 +84,12 @@ def generate_smart_chunking_patterns(llama_docs, sample_size=10):
         r'(^제\s*\d+\s*조[\s\S]{0,60}?)(?=\n|$)',
         r'(제\d+조\([^\)]+\))',
         r'(\b제\d+조(?:의\d+)?\b)',
-        # English / International patterns
-        r'\bArticle\s+\d+[A-Za-z0-9\-]*\b',    # Article 1, Article 1-2
-        r'\bArt\.\s*\d+\b',                    # Art. 1
-        r'\bSection\s+\d+\b',                  # Section 1
-        r'\bSec\.\s*\d+\b',                    # Sec. 1
-        r'§\s*\d+[A-Za-z0-9\-]*',                # § 1, § 1-2
-        r'\bChapter\s+\d+\b'                   # Chapter 1
     ]
     child_candidates = [
         r'(\([①-⑳]\)|[①-⑳])',           # circled numbers
         r'(\(\d+\)|\d+\.)',            # (1) or 1.
         r'(\([가-힣]\)|[가-힣]\.)',       # (가) or 가.
         r'(\([A-Za-z]\)|[A-Za-z]\.)',    # (a) or a.
-        # International/sub-clause patterns
-        r'\b\([ivxIVX]+\)\b|\b[ivxIVX]+\.',   # (iv) or iv.
-        r'\b\([a-z]\)\b|\b[a-z]\.',           # (a) or a.
-        r'\b\([A-Z]\)\b|\b[A-Z]\.',           # (A) or A.
-        r'\b\d+\)\b',                           # 1)
-        r'^[\-\*]\s+',                           # bullet lists starting with - or *
     ]
 
     def score_pattern(pat, text):
