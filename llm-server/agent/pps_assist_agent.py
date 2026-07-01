@@ -1,14 +1,9 @@
-import os
 import json
 from pyexpat.errors import messages
-import streamlit as st
-from typing import List, Dict, Any, TypedDict, Annotated, Sequence
+from typing import List, Dict, Any, Literal, TypedDict
 from pydantic import BaseModel, Field
 
 # LangChain: 대형 언어 모델(LLM)을 편리하게 다루도록 돕는 도구 모음입니다.
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_core.vectorstores import VectorStore
-from langchain_community.vectorstores import FAISS
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 # LangGraph: AI 에이전트들이 순서대로 협업하는 '워크플로우(흐름도)'를 짜게 해주는 라이브러리입니다.
@@ -55,8 +50,14 @@ class AgentState(TypedDict):
     convrstn_context: str            # 대화의 맥락을 담은 텍스트 (대화 내역 + 외부 지식 등)
     contextual_query: str            # 맥락이 강화된 질의문 (원래 질문 + 대화 맥락이 합쳐진 형태)
     queries: List[str]               # 에이전트가 순차적으로 다룰 질문 목록 (예: 1번 로봇이 3개의 질문을 만들어냈다면 ["질문1", "질문2", "질문3"])
-    rag_answer: str                  # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
+    rag_answer: List[BaseMessage|SystemMessage]          # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
+    qna_doc_answer: str                  # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
+    qna_law_base_answer: str                  # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
+    qna_web_search_answer: str                  # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
     current_agent: str               # 현재 이 가방을 쥐고 있는 로봇의 이름
+    enable_ext_docs: bool            # 외부 문서 검색을 활성화할지 여부
+    error_message: str                  # 에러 발생 시, 에러 메시지를 담는 필드
+    status: Literal["success", "failed"]  # 에이전트 상태 (성공/실패)
 
 
 def start_convrstn_node(state: AgentState) -> Dict[str, Any]:
@@ -68,7 +69,7 @@ def start_convrstn_node(state: AgentState) -> Dict[str, Any]:
     
     # 알아낸 정보를 공유 가방에 저장하고, 다음 바톤을 넘겨줄 로봇 이름을 지정합니다.
     return {
-        "convrstn_context": convrstn_context
+        "convrstn_context": convrstn_context,
     }
 
 
@@ -88,29 +89,141 @@ def query_rewrite_node(state: AgentState) -> Dict[str, Any]:
     }
 
 
-async def rag_tool_call_node(state: AgentState) -> Dict[str, Any]:
-    """[에이전트 2: 규정 검토봇] RAG 검색을 통해 관련 법령 텍스트를 찾아옵니다."""
+def qna_doc_node(state: AgentState) -> Dict[str, Any]:
+    """[에이전트 2: 규정 검토봇] 사용자가 첨부한 파일을 RAG탐색하여 질의문의 내용을 찾아옵니다."""
+    if not state["file_full_path"]:
+        return {
+            "qna_doc_answer": ""
+        }
 
-    sse_client_addr = config.settings.MCP_DOC_RAG_URL # SSE 클라이언트 주소
-    sys_message = (
-        "  - The first tool: 사용자가 첨부한 문서 내용에 근거한 답변이 필요한 경우 하위 문서경로를 사용한다. \n"
-        f"    - 첨부문서경로(file_full_path) = {state['file_full_path']}"
-    )
+    tool_info = {
+        "tool": "qna_doc",
+        "input": {"question":state["contextual_query"], "fileFullPath": state["file_full_path"]},
+    }
 
-    # MCP 클라이언트를 통해 도구 호출 및 대화 프로세스 수행 (LLM과 MCP 서버 간의 반복 상호작용)
-    mcpclient_manager = mcpUtils.get_mcp_manager()
-    rag_answer = await mcpclient_manager.complete(sse_client_addr, sys_message, state['convrstn_context'], state['question'], False, HumanMessage(content=state['contextual_query']))
+    try:
+        logger.debug(f"Calling tool qna_doc for convrstn_id={state.get('convrstn_id')} file={state.get('file_full_path')}")
+        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+    except Exception as e:
+        error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
+        logger.error(error_message)
+
+        return {
+            "status": "failed",
+            "error_message": error_message,
+        }
+
+    rag_answer = response.get("response") if isinstance(response, dict) else None
 
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
-        "rag_answer": rag_answer
+        "qna_doc_answer": rag_answer
     }
 
 
-async def run(agent_info, convrstn_id: str, question: str, file_full_path: str) -> Any:
-
+def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
+    """[에이전트 3: 규정 검토봇] 법령, 가이드 파일로 준비된 VectorDB를 RAG탐색하여 질의문의 내용을 찾아옵니다."""
+    # TODO: 질의문과 맥락으로 agent_mode를 결정하는 로직을 추가해야 합니다. 현재는 임시로 PpsStockpilingAgent로 고정되어 있습니다.
+    """
+                    "agent_mode": {
+                        "type": "string",
+                        "description": ("사용자 질문에 적합한 에이전트를 아래 목록에서 '하나만' 선택:\n"
+                                        "- PpsGeneralServiceAgent: 조달청 일반용역 전문 상담\n"
+                                        "- PpsTechnicalServicesAgent: 조달청 기술용역 전문 상담\n"
+                                        "- PpsConstructionAgent: 조달청 시설공사 전문 상담\n"
+                                        "- PpsProductsAgent: 조달청 물품 관련 전문 상담\n"
+                                        "- PpsStockpilingAgent: 조달청 비축 관련 전문 상담")
+                    },
+    """
     
+    llm = config.get_llm().bind(stream=False)
 
+    prompt = ("당신은 조달청 상담의 전문분야를 지정하는 에이전트입니다. 사용자가 입력한 질문과 대화 맥락을 분석하여, 아래 목록에서 가장 적합한 에이전트를 '하나만' 선택하세요.\n"
+                "- PpsGeneralServiceAgent: 조달청 일반용역 전문 상담\n"
+                "- PpsTechnicalServicesAgent: 조달청 기술용역 전문 상담\n"
+                "- PpsConstructionAgent: 조달청 시설공사 전문 상담\n"
+                "- PpsProductsAgent: 조달청 물품 관련 전문 상담\n"
+                "- PpsStockpilingAgent: 조달청 비축 관련 전문 상담\n"
+                "사용자 질문과 대화 맥락을 분석한 후, 가장 적합한 에이전트 이름만 출력하세요. 다른 설명이나 추가 정보는 출력하지 마세요.\n"
+                "사용자 질문: {question}\n"
+                "대화 맥락: {context}\n"
+                "출력형식: 에이전트 이름 (예: PpsGeneralServiceAgent)\n"
+                )
+    try:
+        logger.debug(f"Determining agent_mode for convrstn_id={state.get('convrstn_id')}")
+        llm_response = llm.invoke(prompt.format(question=state["question"], context=state["convrstn_context"]))
+    except Exception as e:
+        logger.error(f"agent_mode determination failed for convrstn_id={state.get('convrstn_id')}: {e}")
+        llm_response = None
+
+    # 안전하게 llm_response.content 접근 (기본값으로 PpsStockpilingAgent 사용)
+    agent_mode = None
+    if llm_response is None:
+        agent_mode = "PpsStockpilingAgent"
+    else:
+        agent_mode = getattr(llm_response, "content", None)
+        if not agent_mode or not isinstance(agent_mode, str):
+            agent_mode = "PpsStockpilingAgent"
+
+    tool_info = {
+        "tool": "qna_law_base",
+        "input": {"question":state["contextual_query"], "agent_mode": agent_mode},
+    }
+
+    try:
+        logger.debug(f"Calling tool qna_law_base with agent_mode={agent_mode} convrstn_id={state.get('convrstn_id')}")
+        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+    except Exception as e:
+        error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
+        logger.error(error_message)
+
+        return {
+            "status": "failed",
+            "error_message": error_message,
+        }
+
+    rag_answer = response.get("response") if isinstance(response, dict) else None
+
+    # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
+    return {
+        "qna_law_base_answer": rag_answer
+    }
+
+
+def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
+    """[에이전트 4: 규정 검토봇] 인터넷 검색 결과를 RAG 검색을 통해 관련 법령 텍스트를 찾아옵니다."""
+    tool_info = {
+        "tool": "qna_web_search",
+        "input": {"question":state["contextual_query"], "allow_search": True},
+    }
+
+    try:
+        logger.debug(f"Calling tool qna_web_search for convrstn_id={state.get('convrstn_id')}")
+        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+    except Exception as e:
+        error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
+        logger.error(error_message)
+
+        return {
+            "status": "failed",
+            "error_message": error_message,
+        }
+
+    rag_answer = response.get("response") if isinstance(response, dict) else None
+
+    # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
+    return {
+        "qna_web_search_answer": rag_answer
+    }
+
+
+def check_enable_ext_docs(state: AgentState) -> Literal["law_base", "web_search"]:
+    if state["enable_ext_docs"] == False:
+        return "law_base"
+    return "web_search"
+
+
+async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, enable_ext_docs: bool) -> Any:
     # ----------------------------------------------------------------------
     # 4. LangGraph 파이프라인(협업 지도) 구성
     # ----------------------------------------------------------------------
@@ -120,17 +233,29 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str) 
     # 1. 일꾼(노드) 등록하기
     workflow.add_node("Start Convrstn Agent", start_convrstn_node)
     workflow.add_node("Query Rewrite Agent", query_rewrite_node)
-    workflow.add_node("Rag Tool Call Agent", rag_tool_call_node)
+    workflow.add_node("Document Search Agent", qna_doc_node)
+    workflow.add_node("Law Base Search Agent", qna_law_base_node)
+    workflow.add_node("Web Search Agent", qna_web_search_node)
 
     # 2. 이동 경로(엣지) 연결하기
     workflow.set_entry_point("Start Convrstn Agent")                 # 시작은 무조건 파싱 전문봇이 합니다.
     workflow.add_edge("Start Convrstn Agent", "Query Rewrite Agent") # 파싱이 끝나면 자동으로 법령 검토봇에게 이동합니다.
-    workflow.add_edge("Query Rewrite Agent", "Rag Tool Call Agent") # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
-    workflow.add_edge("Rag Tool Call Agent", END)                   # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
+    workflow.add_edge("Query Rewrite Agent", "Document Search Agent") # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
+    
+    workflow.add_conditional_edges(
+        "Document Search Agent",
+        check_enable_ext_docs,
+        {
+            "law_base": "Law Base Search Agent",
+            "web_search": "Web Search Agent",
+        },
+    )
+
+    workflow.add_edge("Law Base Search Agent", END)                   # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
+    workflow.add_edge("Web Search Agent", END)                   # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
 
     # 완성된 설계도를 실제로 작동 가능한 프로그램으로 컴파일(구동 준비)합니다.
     app_graph = workflow.compile()
-
 
     # ----------------------------------------------------------------------
     # 2. 실행할 때 초기값(Initial State)을 딕셔너리로 세팅합니다.
@@ -139,11 +264,18 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str) 
         "convrstn_id": convrstn_id,
         "question": question,
         "file_full_path": file_full_path,
+        "enable_ext_docs": enable_ext_docs,
+        "rag_answer": [],
+        "qna_doc_answer" : "",
+        "qna_law_base_answer" : "",
+        "qna_web_search_answer" : "",
     }
 
+    logger.info(f"Starting agent run: convrstn_id={convrstn_id} question={question[:50]}")
     # 3. 인보크(또는 스트림)할 때 첫 번째 인자로 전달합니다.
     agent_state = await app_graph.ainvoke(initial_values)
-    print(agent_state)
+    logger.info(f"Completed workflow for convrstn_id={convrstn_id}")
+    logger.debug(f"agent_state keys: {list(agent_state.keys())}")
 
 
     # 최종 답변 생성을 위한 시스템 지시사항 추가
@@ -167,9 +299,13 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str) 
         f"- **Conversation Context:** {agent_state['convrstn_context']}\n"
         f"- **Original Question:** {agent_state['question']}\n"
         f"- **Enhanced Query:** {agent_state['contextual_query']}\n\n"
-    )   
+    )
     
-    rag_answer = agent_state['rag_answer']  # 이전 노드에서 전달된 대화 메시지 리스트
-    rag_answer.append(SystemMessage(content=final_prompt))
+    agent_state['rag_answer'].append(SystemMessage(content=final_prompt))
+    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_doc_answer', '')))
+    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_law_base_answer', '')))
+    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_web_search_answer', '')))
+
+    logger.info(f"Prepared final RAG messages for convrstn_id={convrstn_id}")
 
     return agent_state

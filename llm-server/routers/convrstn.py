@@ -42,7 +42,7 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
     agent_info = agent_repository.read_agent(request.agent_id)
 
     if request.agent_mode == "PpsAssistAgent":
-        agent_state = await pps_assist_agent.run(agent_info, request.convrstnId, request.question, request.fileFullPath)
+        agent_state = await pps_assist_agent.run(agent_info, request.convrstnId, request.question, request.fileFullPath, request.enableExtDocse)
 
         # tc_llm은 도구 호출용이므로, 일반 답변 생성에는 get_llm()을 사용하는 것이 적절할 수 있음
         # 하지만 일관성을 위해 tc_llm을 유지하되, 스트리밍이 필요한 경우 invoke 대신 stream 사용 고려
