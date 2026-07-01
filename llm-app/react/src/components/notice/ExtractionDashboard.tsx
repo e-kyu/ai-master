@@ -360,7 +360,7 @@ export function ExtractionDashboard({ result, fileName }: Props) {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: viewMode === "fields" ? 11 : 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#3457D5" strokeWidth="2" style={{ flexShrink: 0 }}><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>
-                <span style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700 }}>{isMobile ? "추출 결과" : "추출 결과 (Structured Output)"}</span>
+                <span style={{ fontSize: isMobile ? 13 : 13.5, fontWeight: 700 }}>{isMobile ? "추출 결과" : "입력항목 추출 결과"}</span>
               </div>
               <div style={{ display: "flex", padding: 3, background: "#F1F3F7", borderRadius: 8, gap: 2, flexShrink: 0 }}>
                 <button onClick={() => setViewMode("fields")} style={seg(viewMode === "fields")}>필드</button>
