@@ -3,9 +3,11 @@ import hashlib
 import zipfile
 import tarfile
 import shutil
-import re
 
 from utils import config, loggerUtil
+from utils.chunkingPatterns.lawChunker import LawChunker
+from utils.chunkingPatterns.fallbackChunker import  FallbackChunker
+from tools import convertToMarkdown
 from datetime import datetime
 
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Document, SimpleDirectoryReader
@@ -16,7 +18,7 @@ import faiss
 
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.retrievers import RecursiveRetriever
-from llama_index.core.schema import IndexNode, TextNode
+from llama_index.core.schema import IndexNode
 from llama_index.core.postprocessor import SimilarityPostprocessor, LLMRerank
 from llama_index.core import Settings as LlamaSettings
 
@@ -58,202 +60,57 @@ def getRagPromft():
         """
 
 
-def generate_smart_chunking_patterns(llama_docs, sample_size=10):
+# 마크다운으로 우선 변환할 확장자. pymupdf4llm/markitdown이 표·헤더 구조를 인식해
+# 변환해주므로, 원문 PDF/HTML 텍스트를 그대로 읽을 때보다 LawChunker의 조문/별표
+# 탐지 정확도가 올라간다.
+_MARKDOWN_CONVERTIBLE_EXTS = (".pdf", ".html", ".htm")
+
+
+def _collect_file_paths(data_path):
+    """단일 파일이면 그대로, 디렉토리면 하위 파일 전체를 재귀적으로 모아 반환한다."""
+    if os.path.isfile(data_path):
+        return [data_path]
+    file_paths = []
+    for root, _, names in os.walk(data_path):
+        for name in names:
+            file_paths.append(os.path.join(root, name))
+    return file_paths
+
+
+def _load_documents(data_path):
     """
-    간단한 스마트 청킹 패턴 생성기(정규식 최적화용).
-    일부 문서 페이지를 샘플로 받아서 문서에서 자주 등장하는 조문 및 항 표기 패턴을 탐지하여
-    article_pattern 및 child_pattern 후보를 반환합니다.
+    PDF/HTML(.htm) 문서는 tools/convertToMarkdown.py의 ConvertToMarkdownAgent(execute)로
+    마크다운 변환한 뒤 Document로 감싸고, 그 외 형식은 기존 SimpleDirectoryReader로 로드한다.
+    변환에 실패하면 해당 파일만 SimpleDirectoryReader 처리 목록으로 넘겨 원문 텍스트로라도
+    로드되게 한다.
     """
-    if llama_docs:
-        if len(llama_docs) <= sample_size:
-            texts = [doc.text for doc in llama_docs]
-        else:
-            step = len(llama_docs) / sample_size
-            indices = [min(int(i * step), len(llama_docs) - 1) for i in range(sample_size)]
-            texts = [llama_docs[idx].text for idx in indices]
-    else:
-        texts = [""]
+    llama_docs = []
+    remaining_files = []
 
-    sample = "\n".join(texts)
-
-    # 후보 패턴들 (법률 문서에서 흔히 쓰이는 형태들을 우선 제시)
-    # 국내(한국) 패턴 외에 국제적으로 자주 쓰이는 패턴(영문/라틴식, 섹션 기호 등)을 추가
-    article_candidates = [
-        r'(제\d+조(?:의\d+)?\(.*?\))',
-        r'(제\d+조(?:의\d+)?)',
-        r'(^제\s*\d+\s*조[\s\S]{0,60}?)(?=\n|$)',
-        r'(제\d+조\([^\)]+\))',
-        r'(\b제\d+조(?:의\d+)?\b)',
-    ]
-    child_candidates = [
-        r'(\([①-⑳]\)|[①-⑳])',           # circled numbers
-        r'(\(\d+\)|\d+\.)',            # (1) or 1.
-        r'(\([가-힣]\)|[가-힣]\.)',       # (가) or 가.
-        r'(\([A-Za-z]\)|[A-Za-z]\.)',    # (a) or a.
-    ]
-
-    def score_pattern(pat, text):
-        try:
-            return len(re.findall(pat, text))
-        except re.error:
-            return 0
-
-    best_article = max(article_candidates, key=lambda p: score_pattern(p, sample))
-    best_child = max(child_candidates, key=lambda p: score_pattern(p, sample))
-
-    return {
-        "article_pattern": best_article,
-        "child_pattern": best_child,
-        "sample_counts": {
-            "article_matches": score_pattern(best_article, sample),
-            "child_matches": score_pattern(best_child, sample)
-        }
-    }
-
-
-
-def parse_law_to_hierarchical_nodes(llama_docs, article_pattern, child_pattern):
-    """
-    법률 문서를 조(Parent) 단위와 항/호(Child) 단위로 계층 분할하는 함수
-    """
-    parent_nodes = []
-    all_nodes = []
-    node_dict = {}
-
-    # 전체 문서를 하나의 텍스트로 합치기 (페이지 분할로 조항이 끊기는 것을 방지)
-    full_text = "\n".join([doc.text for doc in llama_docs])
-
-    # 문서 메타데이터에서 법률명을 추출
-    law_title = "답변자료"
-    if llama_docs:
-        first_meta = getattr(llama_docs[0], "metadata", {})
-        if isinstance(first_meta, dict):
-            fname = first_meta.get("file_name")
-            if fname:
-                # 파일명에서 확장자 제거
-                law_title = os.path.splitext(fname)[0]
-
-    # 컴파일하여 멀티라인/유니코드 처리를 명시적으로 수행
-    try:
-        article_re = re.compile(article_pattern, flags=re.MULTILINE)
-    except re.error:
-        article_re = re.compile(r'(제\d+조(?:의\d+)?\(.*?\))', flags=re.MULTILINE)
-
-    try:
-        child_re = re.compile(child_pattern, flags=re.MULTILINE)
-    except re.error:
-        child_re = re.compile(r'(\([①-⑳]\)|[①-⑳])', flags=re.MULTILINE)
-
-    splits = re.split(article_re, full_text)
-    
-    # 첫 조항이 나오기 전 서론/목적 정보 처리
-    # 첫 요소가 조문 제목이 아니라면 서론으로 간주
-    if splits and not article_re.match(splits[0].strip()):
-        intro_text = splits.pop(0).strip()
-        if intro_text:
-            p_node = TextNode(text=intro_text, metadata={"type": "intro"})
-            parent_nodes.append(p_node)
-
-    # 조항 제목과 본문 매칭하여 Parent Node 생성
-    articles = []
-    for i in range(0, len(splits), 2):
-        if i + 1 < len(splits):
-            title = splits[i].strip()
-            content = splits[i+1].strip()
-            articles.append((title, content))
-
-    for title, content in articles:
-        full_article_text = f"{title}\n{content}"
-        
-        # 부모 노드 생성
-        parent_node = TextNode(
-            text=full_article_text,
-            metadata={
-                "law_title": law_title,
-                "article_title": title,
-                "type": "parent"
-            }
-        )
-        parent_nodes.append(parent_node)
-        node_dict[parent_node.node_id] = parent_node
-        all_nodes.append(parent_node)
-
-        # 2. 부모 본문 안에서 항(①, ②, ③) 단위로 자식 노드 분할
-        # 항(Child) 분할 시에도 컴파일된 정규식을 사용
-        paragraphs = re.split(child_re, content)
-        
-        child_chunks = []
-        # 첫 항 시작 전 문구(예: 조항 본문 바로 시작)가 있다면 추가
-        if paragraphs and not child_re.match(paragraphs[0].strip()):
-            first_text = paragraphs.pop(0).strip()
-            if first_text:
-                child_chunks.append(first_text)
-                
-        for j in range(0, len(paragraphs), 2):
-            if j + 1 < len(paragraphs):
-                p_num = paragraphs[j].strip()
-                p_text = paragraphs[j+1].strip()
-                child_chunks.append(f"{p_num} {p_text}")
-
-        # 자식 노드들을 IndexNode로 변환하여 부모 ID와 연결
-        for chunk in child_chunks:
-            if not chunk.strip():
+    for file_path in _collect_file_paths(data_path):
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in _MARKDOWN_CONVERTIBLE_EXTS:
+            logger.info(f"마크다운 변환 중... ({file_path})")
+            contents = convertToMarkdown.execute(file_path)
+            if not contents:
+                logger.warning(f"마크다운 변환 실패, 기본 리더로 대체합니다: ({file_path})")
+                remaining_files.append(file_path)
                 continue
-            
-            # 자식 검색 시 상위 맥락 유실을 방지하기 위해 '법률명 + 조항제목'을 Prefix로 주입
-            contextualized_text = f"법률명: {law_title}\n조항: {title}\n내용: {chunk}"
-            
-            child_node = TextNode(
-                text=contextualized_text,
-                metadata={
-                    "law_title": law_title,
-                    "article_title": title,
-                    "type": "child"
-                }
+            llama_docs.append(
+                Document(
+                    text=contents[0].text,
+                    metadata={"file_name": os.path.basename(file_path), "file_path": file_path},
+                )
             )
-            # IndexNode를 통해 부모의 node_id를 가리키도록 설정 (재귀 탐색의 핵심)
-            i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
-            all_nodes.append(i_node)
+        else:
+            remaining_files.append(file_path)
 
-    return all_nodes, node_dict
+    if remaining_files:
+        reader = SimpleDirectoryReader(input_files=remaining_files, recursive=True)
+        llama_docs.extend(reader.load_data())
 
+    return llama_docs
 
-def create_hierarchical_nodes_with_splitters(
-    documents,
-    parent_chunk_size=1024,
-    parent_chunk_overlap=100,
-    child_chunk_size=256,
-    child_chunk_overlap=50,
-):
-    """
-    기본 Parent-Child 계층형 청킹 구현.
-    부모는 긴 문맥 유지용, 자식은 벡터 검색용 작은 청크로 생성합니다.
-    """
-    parent_splitter = SentenceSplitter(
-        chunk_size=parent_chunk_size,
-        chunk_overlap=parent_chunk_overlap,
-    )
-    child_splitter = SentenceSplitter(
-        chunk_size=child_chunk_size,
-        chunk_overlap=child_chunk_overlap,
-    )
-
-    parent_nodes = parent_splitter.get_nodes_from_documents(documents)
-    all_nodes = []
-    node_dict = {}
-
-    for parent_node in parent_nodes:
-        child_nodes = child_splitter.get_nodes_from_documents([parent_node])
-        for child_node in child_nodes:
-            if not child_node.text.strip():
-                continue
-            indexed_child = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
-            all_nodes.append(indexed_child)
-
-        node_dict[parent_node.node_id] = parent_node
-        all_nodes.append(parent_node)
-
-    return all_nodes, node_dict
 
 # 작성해주신 기존 엔진 생성 함수에 연동
 def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
@@ -296,29 +153,33 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
                 is_compressed = True
 
             logger.info(f"단계 1: 문서 로드 중... ({actual_data_path})")
+            
             reader = SimpleDirectoryReader(
                 input_dir=actual_data_path if os.path.isdir(actual_data_path) else None,
                 input_files=[actual_data_path] if os.path.isfile(actual_data_path) else None,
                 recursive=True
             )
             llama_docs = reader.load_data()
+            # TODO: markdown 변환시 법률 구조 기반 청킹 정확도가 오히려 떨어짐...
+            # llama_docs = _load_documents(actual_data_path)
 
-            # 🚀 [변경 포인트] 기존 SentenceSplitter 대신 법률 맞춤형 정적 분할 함수 호출
+            # 🚀 법률 맞춤형 계층 청킹을 LawChunker에 위임 (조문/항/별표/부칙 구조 기반 파싱)
             logger.info("단계 2: 법률 구조 기반 계층형 노드 생성 (Parent-Child)")
 
-            # 1. 샘플 문서를 기반으로 유효한 조문/항 패턴을 동적으로 탐지
-            patterns = generate_smart_chunking_patterns(llama_docs)
+            law_chunker = LawChunker()
+            fallback_chunker = FallbackChunker()
 
-            if patterns.get("sample_counts", {}).get("article_matches", 0) < 1 or patterns.get("sample_counts", {}).get("child_matches", 0) < 1:
-                logger.warning("샘플 문서에서 조문 패턴을 찾지 못했습니다. 기본 Parent-Child 계층형 청킹을 적용합니다.")
-                all_nodes, node_dict = create_hierarchical_nodes_with_splitters(llama_docs)
+            stats = law_chunker.detect_structure(llama_docs)
+
+            # 조문도 없고 별표도 없으면 이 문서 구조에 맞는 파싱이 불가능 -> fallback
+            if not stats["has_article"] and not stats["has_byeolpyo"]:
+                logger.warning("샘플 문서에서 조문/별표 구조를 찾지 못했습니다. 기본 Parent-Child 계층형 청킹을 적용합니다.")
+                all_nodes, node_dict = fallback_chunker.create_fallback_nodes(llama_docs)
             else:
-                article_pattern = patterns.get("article_pattern", r'(제\d+조(?:의\d+)?\(.*?\))')
-                child_pattern = patterns.get("child_pattern", r'(\([①-⑳]\)|[①-⑳])')
-                all_nodes, node_dict = parse_law_to_hierarchical_nodes(llama_docs, article_pattern, child_pattern)
+                all_nodes, node_dict = law_chunker.parse_to_hierarchical_nodes(llama_docs)
                 if not all_nodes:
                     logger.info("법률 구조 기반 노드 생성에 실패하여 기본 계층형 청킹으로 재시도합니다.")
-                    all_nodes, node_dict = create_hierarchical_nodes_with_splitters(llama_docs)
+                    all_nodes, node_dict = fallback_chunker.create_fallback_nodes(llama_docs)
 
             # 단계 3: 검색을 위한 벡터 인덱스 생성
             logger.info("단계 3: 재귀 탐색용 인덱스 생성")
@@ -335,7 +196,7 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
                 index.storage_context.persist(persist_dir=save_path)
 
         # 5. 검색기(Retriever) 및 엔진 구성
-        vector_retriever = index.as_retriever(similarity_top_k=10)
+        vector_retriever = index.as_retriever(similarity_top_k=20)
 
         recursive_retriever = RecursiveRetriever(
             "vector",
@@ -345,7 +206,7 @@ def make_rag_query_engine(input_path, is_save=False, is_base_resource=False):
         )
 
         node_postprocessors = [
-            SimilarityPostprocessor(similarity_cutoff=0.5),
+            #SimilarityPostprocessor(similarity_cutoff=0.2),
             LLMRerank(top_n=2)  # 법률 선후관계 파악을 위해 top_n을 2 정도로 소폭 상향 조정 권장
         ]
 
