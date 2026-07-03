@@ -4,17 +4,17 @@
 
 1.1 에이전트 워크플로우 (Agent Workflow)
 
-[PpsAssistAgent - 조달 상담 에이전트]
-
-- 구현 기능: 공공조달 관련 사용자 질문을 분석하여 적절한 법령 DB 또는 웹 검색으로 라우팅 후 답변 생성
-- 동작 원리: LangGraph 기반 5-노드 파이프라인으로 구성됨. 사용자 질문 접수 → 대화 히스토리 기반 쿼리 재작성 → 업로드 문서 검색(있을 경우) → 조건 분기(외부문서 사용 여부) → 법령 DB 또는 웹 검색 → LLM 최종 답변 생성 순으로 처리. 법령 검색 시 LLM이 질문 유형을 판단해 전문 에이전트 모드(일반용역/기술용역 등)를 자동 선택함.
-- 주요 기술: LangGraph StateGraph, Azure ChatOpenAI (GPT), MCP Tool Calling, SSE Streaming
-
 [NoticeScanAgent - 입찰공고 분석 에이전트]
 
 - 구현 기능: 입찰공고 문서(PDF/HTML)를 업로드하면 규격화된 메타데이터로 자동 추출 및 법령 위반 여부 감지
 - 동작 원리: 3-노드 파이프라인으로 구성됨. 문서를 Markdown으로 변환 → LLM이 Pydantic 스키마 기반 구조화 출력(with_structured_output())으로 항목 추출 → 오류 발생 시 에러 핸들러 노드로 graceful degradation 처리. 진행 상황은 SSE 스트리밍으로 프론트엔드에 실시간 전달됨.
 - 주요 기술: LangGraph StateGraph, Pydantic BaseModel, SSE Streaming, pymupdf4llm, MarkItDown
+
+[PpsAssistAgent - 조달 상담 에이전트]
+
+- 구현 기능: 공공조달 관련 사용자 질문을 분석하여 적절한 법령 DB 또는 웹 검색으로 라우팅 후 답변 생성
+- 동작 원리: LangGraph 기반 5-노드 파이프라인으로 구성됨. 사용자 질문 접수 → 대화 히스토리 기반 쿼리 재작성 → 업로드 문서 검색(있을 경우) → 조건 분기(외부문서 사용 여부) → 법령 DB 또는 웹 검색 → LLM 최종 답변 생성 순으로 처리. 법령 검색 시 LLM이 질문 유형을 판단해 전문 에이전트 모드(일반용역/기술용역 등)를 자동 선택함.
+- 주요 기술: LangGraph StateGraph, Azure ChatOpenAI (GPT), MCP Tool Calling, SSE Streaming
 
 ---
 1.2 도구(Tool) 및 함수 연동
