@@ -37,6 +37,22 @@ _MD_HEADING_RE = re.compile(r'^\s*#{1,6}\s*')          # "## 제목" -> "제목"
 _MD_BULLET_RE = re.compile(r'^\s*[-*•]\s+')            # "- 제1조(목적)..." -> "제1조(목적)..."
 _MD_PICTURE_PLACEHOLDER_RE = re.compile(r'^\s*\*\*==>.*<==\*\*\s*$')  # 이미지 생략 표시줄(잡음)
 
+# ============================================================
+# 청크 크기 상한
+#
+# 실제 법령 문서는 조문 하나(①②③... 안에 1./2. 호, 가./나. 목, 1)/2) 사이목,
+# 나-1./나-2. 세부항목까지 중첩되기도 하고, 별표는 소수점 번호(4.1, 4.1.1 ...)를
+# 쓰는 다단 채점표가 여러 페이지에 걸치기도 한다. 이 모든 중첩 표기 방식을 정규식
+# 으로 일일이 받아내려 하면 로직이 끝없이 늘어나고 문서마다 또 예외가 생긴다.
+# 대신 "자연스러운 구분자(항/소제목)로 한 번 쪼갠 뒤, 그래도 크면 글자 수 기준
+# 으로 한 번 더 쪼갠다"는 안전장치 하나로 문서 형식과 무관하게 부모/자식 노드
+# 크기를 모두 통제한다. 예전에는 조문/별표 "전체"를 통째로 parent 하나로 만들어서
+# 부모 노드가 페이지 단위로 비대해지고, 그 결과 임베딩 품질과 검색 속도가 함께
+# 나빠졌다 — 부모 크기 상한이 이 문제의 핵심 수정 지점이다.
+# ============================================================
+_MAX_PARENT_CHARS = 1200  # 부모 노드 목표 최대 글자수 - 넘으면 항/소제목 단위로 쪼개 별도 parent로 승격
+_MAX_CHILD_CHARS = 400    # 자식 노드 목표 최대 글자수 - 넘으면 문장 단위로 추가 분할
+
 
 class LawChunker:
     """
@@ -55,6 +71,22 @@ class LawChunker:
     def __init__(self, sample_size=10):
         self.logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
         self.sample_size = sample_size
+        # 항/소제목으로 쪼갠 뒤에도 _MAX_CHILD_CHARS를 넘는 조각을 추가로 잘라내는 안전장치.
+        self._size_splitter = SentenceSplitter(chunk_size=_MAX_CHILD_CHARS, chunk_overlap=40)
+
+    def _cap_text(self, text: str, max_chars: int) -> list:
+        """
+        text가 max_chars 이내면 그대로 1개, 넘으면 문장 단위로 추가 분할해 여러 조각으로
+        반환한다. 항/호/목/사이목처럼 문서마다 제각각인 중첩 표기를 전부 정규식으로
+        받아내는 대신, 이 크기 기준 안전장치 하나로 어떤 문서든 청크 크기를 보장한다.
+        """
+        text = text.strip()
+        if not text:
+            return []
+        if len(text) <= max_chars:
+            return [text]
+        pieces = [p.strip() for p in self._size_splitter.split_text(text) if p.strip()]
+        return pieces or [text]
 
     # ============================================================
     # 1. 문서 구조 탐지
@@ -256,14 +288,52 @@ class LawChunker:
         return sorted(refs)
 
     # ============================================================
-    # 4. 별표 섹션 파서 (표는 쪼개지 않고, 소제목 단위로만 child를 나눈다)
+    # 4. 별표 섹션 파서
+    #    별표 전체(표+세부규정)가 이미 작으면 기존처럼 별표 전체를 하나의 parent로
+    #    쓴다. 하지만 [별표 1]처럼 여러 페이지에 걸친 채점표는 별표 전체를 parent
+    #    하나로 만들면 부모 노드가 지나치게 비대해져 임베딩/검색 속도가 나빠진다.
+    #    이 경우 감지된 소제목(예: "1. 수행능력 평가(30점)") 단위로 parent를 여러
+    #    개로 쪼개고, 소제목이 아예 없으면 크기 기준으로만 잘라 여러 parent를
+    #    만든다 — 표 구조를 보존하려던 기존 "단일 child로 전체 보존" 전략은
+    #    다단 채점표에서는 오히려 검색을 느리게 만들므로 더 이상 쓰지 않는다.
+    #    반환값은 (parent_node, child_nodes) 쌍의 리스트다.
     # ============================================================
     def _parse_byeolpyo_section(self, section, law_title):
         table_no = section["meta"]["table_no"]
         header = section["header"]
         body = section["body"]
-        full_text = f"{header}\n{body}"
+        full_text = f"{header}\n{body}".strip()
 
+        sub_re = re.compile(_BEOPYO_SUB_RE, re.MULTILINE)
+        matches = list(sub_re.finditer(body))
+
+        if len(full_text) <= _MAX_PARENT_CHARS or not matches:
+            return [self._build_byeolpyo_parent(table_no, header, body, law_title)]
+
+        # 소제목 단위로 쪼개 각 소제목을 독립된(더 작은) parent로 승격시킨다.
+        results = []
+        preface = body[: matches[0].start()].strip() if matches[0].start() > 0 else ""
+
+        for idx, m in enumerate(matches):
+            sub_title = m.group(0).strip()
+            start = m.end()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
+            sub_content = body[start:end].strip()
+            if preface:
+                sub_content = f"{preface}\n{sub_content}".strip()
+                preface = ""  # 서두 문구는 첫 소제목에만 한 번 붙인다
+            results.append(
+                self._build_byeolpyo_parent(
+                    table_no, f"{header} - {sub_title}", sub_content, law_title, section_title=sub_title
+                )
+            )
+
+        self.logger.debug(f"[LawChunker] 별표 '{table_no}' 크기 초과로 소제목 {len(results)}개 parent로 분할")
+        return results
+
+    def _build_byeolpyo_parent(self, table_no, header, content, law_title, section_title=None):
+        """별표(또는 별표 소제목) 하나를 parent 노드 1개 + 크기 상한을 지킨 child 노드들로 만든다."""
+        full_text = f"{header}\n{content}".strip()
         parent_node = TextNode(
             text=full_text,
             metadata={
@@ -271,39 +341,22 @@ class LawChunker:
                 "doc_type": "별표",
                 "table_no": table_no,
                 "table_title": header,
+                "section": section_title,
                 "type": "parent",
                 "cross_refs": self._extract_cross_refs(full_text),
             },
         )
 
-        sub_re = re.compile(_BEOPYO_SUB_RE, re.MULTILINE)
-        matches = list(sub_re.finditer(body))
-        child_chunks = []
-
-        if not matches:
-            # 소제목이 없으면 표 전체 보존을 우선해 단일 child로 처리한다.
-            if body.strip():
-                child_chunks.append((header, body.strip()))
-        else:
-            if matches[0].start() > 0:
-                preface = body[: matches[0].start()].strip()
-                if preface:
-                    child_chunks.append(("서문", preface))
-            for idx, m in enumerate(matches):
-                sub_title = m.group(0).strip()
-                start = m.end()
-                end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
-                content = body[start:end].strip()
-                child_chunks.append((sub_title, content))
-
+        pieces = self._cap_text(content, _MAX_CHILD_CHARS)
         child_nodes = []
-        for sub_title, content in child_chunks:
-            if not content.strip():
-                continue
+        for idx, piece in enumerate(pieces):
+            label = section_title or header
+            if len(pieces) > 1:
+                label = f"{label} ({idx + 1}/{len(pieces)})"
             contextualized_text = (
                 f"별표: {table_no} ({header})\n"
-                f"구분: {sub_title}\n"
-                f"내용:\n{content}"
+                f"구분: {label}\n"
+                f"내용:\n{piece}"
             )
             child_node = TextNode(
                 text=contextualized_text,
@@ -312,32 +365,71 @@ class LawChunker:
                     "doc_type": "별표",
                     "table_no": table_no,
                     "table_title": header,
-                    "section": sub_title,
+                    "section": label,
                     "type": "child",
-                    "contains_table": "|" in content,
-                    "cross_refs": self._extract_cross_refs(content),
+                    "contains_table": "|" in piece,
+                    "cross_refs": self._extract_cross_refs(piece),
                 },
             )
             i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
             child_nodes.append(i_node)
 
-        self.logger.debug(f"[LawChunker] 별표 '{table_no}' 파싱 완료 - child {len(child_nodes)}개")
+        self.logger.debug(f"[LawChunker] 별표 '{table_no}' ({header}) 파싱 완료 - child {len(child_nodes)}개")
         return parent_node, child_nodes
 
     # ============================================================
     # 5. 조문 섹션 파서
-    #    항(①②③)이 있으면 항 단위로 분할하고, 없으면 호(1. 2. 3.) 단위로
-    #    분할한다. 한 조문 안에 항/호 표기가 동시에 등장하는 경우는 실무상
-    #    거의 없어(예: "정의" 조문은 호만, 대부분의 조문은 항만 사용) 이
-    #    2단 우선순위만으로 충분하며 후보 스코어링 같은 추가 로직은 불필요하다.
+    #    조문 전체(제목+①~⑨ 전부)가 이미 작으면 기존처럼 조문 전체를 하나의
+    #    parent로 쓴다. 하지만 항이 여러 개거나 항 하나에 호/목/사이목까지 깊게
+    #    중첩된 조문(예: 제2조③이 1.~7.호, 그 안에 가.~아.목까지 갖는 경우)은
+    #    조문 전체를 parent 하나로 만들면 부모 노드가 지나치게 비대해진다.
+    #    이 경우 항(①②③...) 단위로 parent를 여러 개로 쪼갠다. 항조차 없는
+    #    조문은 기존처럼 조문 전체가 parent다. 각 parent 안에서는 호(1. 2. 3.)로
+    #    한 번 더 나누고, 그래도 크면 크기 상한(_cap_text)으로 추가 분할한다 —
+    #    가/나/목이나 사이목, 소수점 번호 같은 세부 표기까지 정규식으로 쫓아가는
+    #    대신 이 크기 상한이 안전망 역할을 한다.
+    #    반환값은 (parent_node, child_nodes) 쌍의 리스트다.
     # ============================================================
     def _parse_article_section(self, section, law_title):
         article_no = section["meta"].get("article_no")
         title = section["meta"]["article_title"]
         header = section["header"]
         content = section["body"]
-        full_text = f"{header}\n{content}"
+        full_text = f"{header}\n{content}".strip()
 
+        if len(full_text) <= _MAX_PARENT_CHARS or not re.search(_PARAGRAPH_RE, content):
+            return [self._build_article_parent(header, title, article_no, content, law_title)]
+
+        # 항(①②③...) 단위로 쪼개 각 항을 독립된(더 작은) parent로 승격시킨다.
+        paragraph_re = re.compile(f'({_PARAGRAPH_RE})')
+        parts = paragraph_re.split(content)
+
+        preface = ""
+        if parts and not paragraph_re.match(parts[0].strip()):
+            preface = parts.pop(0).strip()
+
+        results = []
+        for j in range(0, len(parts), 2):
+            if j + 1 >= len(parts):
+                continue
+            marker = parts[j].strip()
+            para_content = parts[j + 1].strip()
+            if preface:
+                para_content = f"{preface}\n{para_content}".strip()
+                preface = ""  # 서두 문구는 첫 항에만 한 번 붙인다
+            results.append(
+                self._build_article_parent(
+                    f"{header} {marker}", f"{title} {marker}", article_no, para_content,
+                    law_title, paragraph_no=marker,
+                )
+            )
+
+        self.logger.debug(f"[LawChunker] {title} 크기 초과로 항 {len(results)}개 parent로 분할")
+        return results
+
+    def _build_article_parent(self, header, title, article_no, content, law_title, paragraph_no=None):
+        """조문(또는 조문의 항 하나) 을 parent 노드 1개 + 크기 상한을 지킨 child 노드들로 만든다."""
+        full_text = f"{header}\n{content}".strip()
         parent_node = TextNode(
             text=full_text,
             metadata={
@@ -345,61 +437,58 @@ class LawChunker:
                 "doc_type": "조문",
                 "article_no": article_no,
                 "article_title": title,
+                "paragraph_no": paragraph_no,
                 "type": "parent",
                 "cross_refs": self._extract_cross_refs(full_text),
             },
         )
 
-        if re.search(_PARAGRAPH_RE, content):
-            split_re = re.compile(f'({_PARAGRAPH_RE})')
-        elif re.search(_ITEM_RE, content, re.MULTILINE):
-            split_re = re.compile(f'({_ITEM_RE})', re.MULTILINE)
-        else:
-            split_re = None
-
-        child_chunks = []
-        if split_re is None:
-            # 항/호 구분이 전혀 없는 짧은 조문은 본문 전체를 하나의 child로 둔다.
-            if content.strip():
-                child_chunks.append(("", content.strip()))
-        else:
-            parts = split_re.split(content)
-            if parts and not split_re.match(parts[0].strip()):
+        if re.search(_ITEM_RE, content, re.MULTILINE):
+            item_re = re.compile(f'({_ITEM_RE})', re.MULTILINE)
+            parts = item_re.split(content)
+            child_chunks = []
+            if parts and not item_re.match(parts[0].strip()):
                 first_text = parts.pop(0).strip()
                 if first_text:
                     child_chunks.append(("", first_text))
             for j in range(0, len(parts), 2):
                 if j + 1 < len(parts):
-                    marker = parts[j].strip()
-                    body_text = parts[j + 1].strip()
-                    child_chunks.append((marker, body_text))
+                    child_chunks.append((parts[j].strip(), parts[j + 1].strip()))
+        else:
+            # 호 구분이 없으면 본문 전체를 하나의 조각으로 두고, 크기 상한이 필요시 나눈다.
+            child_chunks = [("", content.strip())] if content.strip() else []
 
         child_nodes = []
         for marker, chunk in child_chunks:
             if not chunk.strip():
                 continue
-            breadcrumb = f"{title}" + (f" {marker}" if marker else "")
-            # 자식 검색 시 상위 맥락 유실을 막기 위해 법률명/조항 정보를 본문 앞에 주입한다.
-            contextualized_text = (
-                f"법률명: {law_title}\n"
-                f"조항: {breadcrumb}\n"
-                f"내용: {chunk}"
-            )
-            child_node = TextNode(
-                text=contextualized_text,
-                metadata={
-                    "law_title": law_title,
-                    "doc_type": "조문",
-                    "article_no": article_no,
-                    "article_title": title,
-                    "paragraph_no": marker,
-                    "breadcrumb": breadcrumb,
-                    "type": "child",
-                    "cross_refs": self._extract_cross_refs(chunk),
-                },
-            )
-            i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
-            child_nodes.append(i_node)
+            pieces = self._cap_text(chunk, _MAX_CHILD_CHARS)
+            for idx, piece in enumerate(pieces):
+                breadcrumb = title + (f" {marker}" if marker else "")
+                if len(pieces) > 1:
+                    breadcrumb = f"{breadcrumb} ({idx + 1}/{len(pieces)})"
+                # 자식 검색 시 상위 맥락 유실을 막기 위해 법률명/조항 정보를 본문 앞에 주입한다.
+                contextualized_text = (
+                    f"법률명: {law_title}\n"
+                    f"조항: {breadcrumb}\n"
+                    f"내용: {piece}"
+                )
+                child_node = TextNode(
+                    text=contextualized_text,
+                    metadata={
+                        "law_title": law_title,
+                        "doc_type": "조문",
+                        "article_no": article_no,
+                        "article_title": title,
+                        "paragraph_no": paragraph_no,
+                        "item_no": marker,
+                        "breadcrumb": breadcrumb,
+                        "type": "child",
+                        "cross_refs": self._extract_cross_refs(piece),
+                    },
+                )
+                i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
+                child_nodes.append(i_node)
 
         self.logger.debug(f"[LawChunker] {title} 파싱 완료 - child {len(child_nodes)}개")
         return parent_node, child_nodes
@@ -427,29 +516,30 @@ class LawChunker:
 
         for section in sections:
             if section["type"] == "intro":
-                if section["body"].strip():
+                # 서두 문구도 크기 상한을 넘으면 여러 parent로 나눠 통제한다.
+                for piece in self._cap_text(section["body"], _MAX_PARENT_CHARS):
                     p_node = TextNode(
-                        text=section["body"],
+                        text=piece,
                         metadata={"law_title": law_title, "doc_type": "intro", "type": "parent"},
                     )
                     all_nodes.append(p_node)
                     node_dict[p_node.node_id] = p_node
 
             elif section["type"] == "조문":
-                parent_node, child_nodes = self._parse_article_section(section, law_title)
-                node_dict[parent_node.node_id] = parent_node
-                all_nodes.append(parent_node)
-                all_nodes.extend(child_nodes)
+                for parent_node, child_nodes in self._parse_article_section(section, law_title):
+                    node_dict[parent_node.node_id] = parent_node
+                    all_nodes.append(parent_node)
+                    all_nodes.extend(child_nodes)
 
             elif section["type"] == "별표":
-                parent_node, child_nodes = self._parse_byeolpyo_section(section, law_title)
-                # 다른 별표들과 서로 참조할 수 있도록 형제 별표 목록을 메타데이터로 남긴다.
-                parent_node.metadata["peer_tables"] = [
-                    t for t in all_table_nos if t != parent_node.metadata["table_no"]
-                ]
-                node_dict[parent_node.node_id] = parent_node
-                all_nodes.append(parent_node)
-                all_nodes.extend(child_nodes)
+                for parent_node, child_nodes in self._parse_byeolpyo_section(section, law_title):
+                    # 다른 별표들과 서로 참조할 수 있도록 형제 별표 목록을 메타데이터로 남긴다.
+                    parent_node.metadata["peer_tables"] = [
+                        t for t in all_table_nos if t != parent_node.metadata["table_no"]
+                    ]
+                    node_dict[parent_node.node_id] = parent_node
+                    all_nodes.append(parent_node)
+                    all_nodes.extend(child_nodes)
 
             elif section["type"] == "부칙":
                 text = f"{section['header']}\n{section['body']}"

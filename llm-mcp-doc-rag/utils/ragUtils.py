@@ -296,7 +296,7 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
                 index.storage_context.persist(persist_dir=save_path)
 
         # 5. 질문에 가장 적합한 문서 조각을 찾아내는 검색기를 설정합니다.
-        vector_retriever = index.as_retriever(similarity_top_k=10)
+        vector_retriever = index.as_retriever(similarity_top_k=50)
 
         # 작은 조각을 찾았을 때 자동으로 주변 문맥(부모)까지 가져오는 똑똑한 검색 방식을 사용합니다.
         recursive_retriever = RecursiveRetriever(
@@ -309,8 +309,8 @@ def makeRagRetrieverFromDocs(docs, bSave=False):
         # 검색된 결과 중 연관성이 낮은 것은 버리고, 가장 정답에 가까운 순서로 다시 정렬합니다.
         # TODO: FlagEmbeddingReranker를 사용하여 검색속도를 상승시키는 것이 유의미 한지 검증 필요. LLMRerank는 품질은 좋으나 속도가 매우 느림. 꼭 필요한 경우에만 top_n을 최소화하여 사용
         node_postprocessors = [
-            SimilarityPostprocessor(similarity_cutoff=0.5),
-            LLMRerank(top_n=2) 
+            #SimilarityPostprocessor(similarity_cutoff=0.2),
+            LLMRerank(top_n=3) 
         ]
         
 
