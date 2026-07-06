@@ -38,11 +38,13 @@ class QuestionRequest(BaseModel):
 # 엔드포인트 경로 수정 (/stream -> 유지)
 @router.post("/question")
 async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
+    logger.info(f"[ConvrstnRouter] 질의 요청 수신 agent_mode={request.agent_mode} convrstn_id={request.convrstnId} question={request.question[:50]}")
 
     agent_info = agent_repository.read_agent(request.agent_id)
 
     if request.agent_mode == "PpsAssistAgent":
         agent_state = await pps_assist_agent.run(agent_info, request.convrstnId, request.question, request.fileFullPath, request.enableExtDocse)
+        logger.info(f"[ConvrstnRouter] PpsAssistAgent 워크플로우 완료, 최종 답변 스트리밍 시작 convrstn_id={request.convrstnId}")
 
         # tc_llm은 도구 호출용이므로, 일반 답변 생성에는 get_llm()을 사용하는 것이 적절할 수 있음
         # 하지만 일관성을 위해 tc_llm을 유지하되, 스트리밍이 필요한 경우 invoke 대신 stream 사용 고려
@@ -69,11 +71,12 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                         
                 # 생성이 완료된 후(또는 에러 발생 후) DB에 저장
                 convrstn_repository.create_convrstn_answer(request.convrstnId, {"convrstn_details_id": agent_state['convrstn_details_id'], "answer": full_response, "agent_id": request.agent_id, "answer_at": datetime.now()})
+                logger.info(f"[ConvrstnRouter] 최종 답변 스트리밍 및 저장 완료 convrstn_id={request.convrstnId} answer_length={len(full_response)}")
 
         return StreamingResponse(event_generator(), media_type="text/plain")
     elif request.agent_mode == "NoticeScanAgent":
         agent = PureLangNoticeScanAgent()
-        print("=== 순수 Lang 컴포넌트 기반 파이프라인 가동 (스트리밍) ===")
+        logger.info(f"[ConvrstnRouter] NoticeScanAgent 파이프라인 가동(스트리밍) convrstn_id={request.convrstnId} file={request.fileFullPath}")
 
         async def notice_event_generator():
             final_state = None
@@ -81,6 +84,8 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 if event.get("type") == "result":
                     final_state = event.get("data")
+
+            logger.info(f"[ConvrstnRouter] NoticeScanAgent 파이프라인 종료 convrstn_id={request.convrstnId} status={(final_state or {}).get('status')}")
 
             if final_state:
                 structured = final_state

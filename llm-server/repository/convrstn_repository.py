@@ -9,6 +9,9 @@ from db.models import Convrstn as modelConvrstn
 from db.models import ConvrstnDetails as modelConvrstnDetails
 from db.models import Agent as modelAgent
 from db.schemas import ConvrstnSchema, ConvrstnCreate, ConvrstnDetailsSchema, ConvrstnDetailsCreate , ConvrstnListSchema
+from utils import config
+
+logger = config.get_logger("./log", "llm-server")
 
 
 def create_convrstn(convrstn_id: str, dict_convrstn: dict = {}):
@@ -93,6 +96,7 @@ def create_convrstn_question(convrstn_id: str, dict_convrstn_details: dict):
             })
         )
         db.commit()
+        logger.debug(f"[ConvrstnRepository] 질문 저장 완료 convrstn_id={convrstn_id} convrstn_details_id={convrstn_details_id}")
 
         # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
         inserted_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == convrstn_details_id)).first()
@@ -127,6 +131,7 @@ def create_convrstn_answer(convrstn_id: str, dict_convrstn_details: dict):
             .values({"answer": dict_convrstn_details.get("answer", ""), "answer_at": func.now(), "agent_id": dict_convrstn_details.get("agent_id", None)})
         )
         db.commit()
+        logger.info(f"[ConvrstnRepository] 답변 저장 완료 convrstn_id={convrstn_id} convrstn_details_id={dict_convrstn_details.get('convrstn_details_id')}")
 
         # 2. 업데이트된 객체 찾아서 반환 (None 에러 방지)
         updated_item = db.query(modelConvrstnDetails).filter(and_(modelConvrstnDetails.convrstn_id == convrstn_id, modelConvrstnDetails.convrstn_details_id == dict_convrstn_details.get("convrstn_details_id"))).first()
@@ -235,11 +240,12 @@ def delete_convrstn(convrstn_id: str):
     try:
         db.query(modelConvrstnDetails).filter(modelConvrstnDetails.convrstn_id == convrstn_id).delete()
         db.query(modelConvrstn).filter(modelConvrstn.convrstn_id == convrstn_id).delete()
-        db.commit()    
+        db.commit()
+        logger.info(f"[ConvrstnRepository] 대화 삭제 완료 convrstn_id={convrstn_id}")
         return True
     except Exception as e:
         db.rollback()
-        print(f"Error deleting conversation: {e}")
+        logger.error(f"[ConvrstnRepository] 대화 삭제 실패 convrstn_id={convrstn_id}: {e}")
         return False
     finally:
         db.close()

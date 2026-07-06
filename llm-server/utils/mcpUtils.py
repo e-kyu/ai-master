@@ -292,14 +292,17 @@ def call_tool(sse_client_addr, tool_info):
              {"status": "failed", "error_message": ...}
     """
     async def _call_tool_async():
+        logger.info(f"[MCP] 도구 호출 시작 tool={tool_info['tool']} input={tool_info['input']}")
         try:
             async with mcp_session(sse_client_addr) as session:
                 tool_response = await session.call_tool(tool_info["tool"], tool_info["input"])
+                logger.info(f"[MCP] 도구 호출 완료 tool={tool_info['tool']}")
                 return {
                     "status": "success",
                     "response": tool_response.content[0].text,
                 }
         except Exception as err:
+            logger.error(f"[MCP] 도구 호출 실패 tool={tool_info['tool']}: {err}")
             return {
                 "status": "failed",
                 "error_message": f"MCP 도구 호출 중 오류 발생: {str(err)}",

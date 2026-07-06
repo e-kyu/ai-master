@@ -61,12 +61,16 @@ class AgentState(TypedDict):
 
 
 def start_convrstn_node(state: AgentState) -> Dict[str, Any]:
+    """[Start Convrstn Agent] 대화 세션을 생성하고 이전 대화 맥락을 불러옵니다."""
+    logger.info(f"[Start Convrstn Agent] 시작 convrstn_id={state['convrstn_id']} question={state['question'][:50]}")
+
     # 대화 ID로 대화 시작 기록 생성
     convrstn_repository.create_convrstn(state['convrstn_id'], {"topic": state['question']})
 
     # 대화의 맥락을 조회 또는 생성
     convrstn_context = convrstnContextUtils.get_convrstn_context(state['convrstn_id'], state['question'])
-    
+
+    logger.info(f"[Start Convrstn Agent] 완료 convrstn_id={state['convrstn_id']}")
     # 알아낸 정보를 공유 가방에 저장하고, 다음 바톤을 넘겨줄 로봇 이름을 지정합니다.
     return {
         "convrstn_context": convrstn_context,
@@ -75,13 +79,15 @@ def start_convrstn_node(state: AgentState) -> Dict[str, Any]:
 
 def query_rewrite_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 1: 파싱 전문봇] 비정형 줄글 텍스트를 분석해 규격화된 서식(JSON)을 만듭니다."""
-    
+    logger.info(f"[Query Rewrite Agent] 시작 convrstn_id={state['convrstn_id']}")
+
     # 강화된 질의문 생성
     contextual_query = convrstnContextUtils.enhance_query_with_context(state['convrstn_context'], state['question'])
 
     # 대화내역에 강화된 질의문과 맥락 저장 (질의문과 답변이 같은 테이블에 저장되도록 수정)
     create_convrstn_question = convrstn_repository.create_convrstn_question(state['convrstn_id'], {"context": json.dumps(state['convrstn_context'], ensure_ascii=False), "question": state['question'], "enhanced_question": contextual_query})
-    
+
+    logger.info(f"[Query Rewrite Agent] 완료 convrstn_id={state['convrstn_id']} contextual_query={contextual_query[:100]}")
     # 알아낸 정보를 공유 가방에 저장하고, 다음 바톤을 넘겨줄 로봇 이름을 지정합니다.
     return {
         "convrstn_details_id": create_convrstn_question.convrstn_details_id,
@@ -91,7 +97,9 @@ def query_rewrite_node(state: AgentState) -> Dict[str, Any]:
 
 def qna_doc_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 2: 규정 검토봇] 사용자가 첨부한 파일을 RAG탐색하여 질의문의 내용을 찾아옵니다."""
+    logger.info(f"[Document Search Agent] 시작 convrstn_id={state.get('convrstn_id')} file={state.get('file_full_path')}")
     if not state["file_full_path"]:
+        logger.info(f"[Document Search Agent] 첨부 파일 없어 건너뜀 convrstn_id={state.get('convrstn_id')}")
         return {
             "qna_doc_answer": ""
         }
@@ -106,7 +114,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
         response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(error_message)
+        logger.error(f"[Document Search Agent] 실패 convrstn_id={state.get('convrstn_id')}: {error_message}")
 
         return {
             "status": "failed",
@@ -115,6 +123,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
 
     rag_answer = response.get("response") if isinstance(response, dict) else None
 
+    logger.info(f"[Document Search Agent] 완료 convrstn_id={state.get('convrstn_id')} answer_length={len(rag_answer) if rag_answer else 0}")
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
         "qna_doc_answer": rag_answer
@@ -123,6 +132,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
 
 def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 3: 규정 검토봇] 법령, 가이드 파일로 준비된 VectorDB를 RAG탐색하여 질의문의 내용을 찾아옵니다."""
+    logger.info(f"[Law Base Search Agent] 시작 convrstn_id={state.get('convrstn_id')}")
     # TODO: 질의문과 맥락으로 agent_mode를 결정하는 로직을 추가해야 합니다. 현재는 임시로 PpsStockpilingAgent로 고정되어 있습니다.
     """
                     "agent_mode": {
@@ -165,6 +175,8 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
         if not agent_mode or not isinstance(agent_mode, str):
             agent_mode = "PpsStockpilingAgent"
 
+    logger.info(f"[Law Base Search Agent] agent_mode 결정 convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}")
+
     tool_info = {
         "tool": "qna_law_base",
         "input": {"question":state["contextual_query"], "agent_mode": agent_mode},
@@ -175,7 +187,7 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
         response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(error_message)
+        logger.error(f"[Law Base Search Agent] 실패 convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}: {error_message}")
 
         return {
             "status": "failed",
@@ -184,6 +196,7 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
 
     rag_answer = response.get("response") if isinstance(response, dict) else None
 
+    logger.info(f"[Law Base Search Agent] 완료 convrstn_id={state.get('convrstn_id')} answer_length={len(rag_answer) if rag_answer else 0}")
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
         "qna_law_base_answer": rag_answer
@@ -192,6 +205,7 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
 
 def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 4: 규정 검토봇] 인터넷 검색 결과를 RAG 검색을 통해 관련 법령 텍스트를 찾아옵니다."""
+    logger.info(f"[Web Search Agent] 시작 convrstn_id={state.get('convrstn_id')}")
     tool_info = {
         "tool": "qna_web_search",
         "input": {"question":state["contextual_query"], "allow_search": True},
@@ -202,7 +216,7 @@ def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
         response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(error_message)
+        logger.error(f"[Web Search Agent] 실패 convrstn_id={state.get('convrstn_id')}: {error_message}")
 
         return {
             "status": "failed",
@@ -211,6 +225,7 @@ def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
 
     rag_answer = response.get("response") if isinstance(response, dict) else None
 
+    logger.info(f"[Web Search Agent] 완료 convrstn_id={state.get('convrstn_id')} answer_length={len(rag_answer) if rag_answer else 0}")
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
         "qna_web_search_answer": rag_answer
@@ -218,6 +233,8 @@ def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
 
 
 def check_enable_ext_docs(state: AgentState) -> Literal["law_base", "web_search"]:
+    branch = "web_search" if state["enable_ext_docs"] else "law_base"
+    logger.info(f"[Router] enable_ext_docs={state['enable_ext_docs']} -> '{branch}' 노드로 분기 convrstn_id={state.get('convrstn_id')}")
     if state["enable_ext_docs"] == False:
         return "law_base"
     return "web_search"

@@ -41,6 +41,8 @@ async def decompose_question(state: GraphState):
         logger.error(f"Decomposition error: {e}")
         sub_questions = [state['question']]
     
+    logger.info(f"Decomposition failed, using original question: {state['question']}")
+    logger.info(f"Decomposition failed, using original question: {sub_questions}")
     return {"sub_questions": sub_questions}
 
 # 2. 엔진 준비 노드
@@ -58,6 +60,57 @@ async def prepare_engines(state: GraphState):
     
     return {"query_engines": engines}
 
+"""
+# 3. RAG 실행 노드
+async def execute_rag(state: GraphState):
+    logger.info("---EXECUTING RAG---")
+    # 엔진별로 순차 처리(for engine ...: await gather(...))하면, 한 모드에 엔진이
+    # 여러 개 등록된 경우(세미콜론으로 구분된 다중 리소스, 예: PpsStockpilingAgent의
+    # Guide.zip + Agent.zip) 지연시간이 엔진 개수만큼 그대로 누적된다. (엔진, 하위질문)
+    # 조합을 전부 한 번에 gather로 병렬 실행해 전체 지연시간을 가장 느린 호출 1건 수준으로 줄인다.
+    tasks = [
+        engine.aquery(sub_q)
+        for engine in state['query_engines']
+        for sub_q in state['sub_questions']
+    ]
+    responses = await asyncio.gather(*tasks)
+
+    contexts = [
+        {
+            "type": "text",
+            "text": res.response,
+            "metadata": res.metadata,
+        }
+        for res in responses
+    ]
+    return {"retrieved_contexts": contexts}
+"""
+
+# 3. RAG 실행 노드
+async def execute_rag(state: GraphState):
+    logger.info("---EXECUTING RAG---")
+    # 엔진별로 순차 처리(for engine ...: await gather(...))하면, 한 모드에 엔진이
+    # 여러 개 등록된 경우(세미콜론으로 구분된 다중 리소스, 예: PpsStockpilingAgent의
+    # Guide.zip + Agent.zip) 지연시간이 엔진 개수만큼 그대로 누적된다. (엔진, 하위질문)
+    # 조합을 전부 한 번에 gather로 병렬 실행해 전체 지연시간을 가장 느린 호출 1건 수준으로 줄인다.
+    tasks = [
+        engine.aquery(sub_q)
+        for engine in state['query_engines']
+        for sub_q in state['sub_questions']
+    ]
+    responses = await asyncio.gather(*tasks)
+
+    contexts = [
+        {
+            "type": "text",
+            "text": res.response,
+            "metadata": res.metadata,
+        }
+        for res in responses
+    ]
+    return {"retrieved_contexts": contexts}
+
+"""
 # 3. RAG 실행 노드
 async def execute_rag(state: GraphState):
     logger.info("---EXECUTING RAG---")
@@ -72,6 +125,7 @@ async def execute_rag(state: GraphState):
                 "metadata": res.metadata
             })
     return {"retrieved_contexts": contexts}
+"""
 
 async def execute(question: str, pdfFileFullPath: str = "" , agent_mode: str = "" ,allow_search: bool = False) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     start_time = time.time()

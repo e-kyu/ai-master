@@ -65,6 +65,7 @@ class PureLangNoticeScanAgent:
 
     def convert_to_markdown_node(self, state: AgentState) -> Dict[str, Any]:
         writer = get_stream_writer()
+        self.logger.info(f"[NoticeScan][convert_to_markdown] 시작 file_path={state['file_path']}")
         writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "running", "message": "문서를 마크다운으로 변환하는 중..."})
 
         tool_info = {
@@ -76,6 +77,7 @@ class PureLangNoticeScanAgent:
             response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
         except Exception as e:
             error_message = f"Markdown 변환 도구 호출 실패: {str(e)}"
+            self.logger.error(f"[NoticeScan][convert_to_markdown] 실패 file_path={state['file_path']}: {error_message}")
             writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message or "변환 실패"})
             return {
                 "status": "failed",
@@ -87,6 +89,7 @@ class PureLangNoticeScanAgent:
             pass
         else:
             error_message = "변환 도구 응답이 예상한 형식이 아닙니다."
+            self.logger.error(f"[NoticeScan][convert_to_markdown] 실패 file_path={state['file_path']}: {error_message}")
             writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message})
             return {
                 "status": "failed",
@@ -94,12 +97,14 @@ class PureLangNoticeScanAgent:
             }
         if not document_text:
             error_message = "Markdown 변환 도구가 텍스트를 반환하지 않았습니다."
+            self.logger.error(f"[NoticeScan][convert_to_markdown] 실패 file_path={state['file_path']}: {error_message}")
             writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "failed", "message": error_message})
             return {
                 "status": "failed",
                 "error_message": error_message,
             }
 
+        self.logger.info(f"[NoticeScan][convert_to_markdown] 완료 file_path={state['file_path']} document_length={len(document_text)}")
         writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "done", "message": "변환 완료"})
         return {
             "document_text": document_text,
@@ -108,6 +113,7 @@ class PureLangNoticeScanAgent:
 
     def extract_metadata_node(self, state: AgentState) -> Dict[str, Any]:
         writer = get_stream_writer()
+        self.logger.info(f"[NoticeScan][extract_metadata] 시작 file_path={state['file_path']}")
         writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "running", "message": "메타데이터 구조화 및 규정 위반 검증 중..."})
 
         chain = self.prompt | self.structured_llm
@@ -116,6 +122,7 @@ class PureLangNoticeScanAgent:
             data_dict = response.model_dump()
             is_violating = bool(data_dict.get("regulatory_review_notice"))
 
+            self.logger.info(f"[NoticeScan][extract_metadata] 완료 file_path={state['file_path']} is_violating={is_violating}")
             writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "done", "message": "추출 완료"})
             return {
                 "extracted_data": data_dict,
@@ -124,6 +131,7 @@ class PureLangNoticeScanAgent:
             }
         except Exception as e:
             error_message = f"구조화 데이터 생성 실패: {str(e)}"
+            self.logger.error(f"[NoticeScan][extract_metadata] 실패 file_path={state['file_path']}: {error_message}")
             writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "failed", "message": error_message or "추출 실패"})
             return {
                 "status": "failed",
@@ -131,6 +139,7 @@ class PureLangNoticeScanAgent:
             }
 
     def error_handling_node(self, state: AgentState) -> Dict[str, Any]:
+        self.logger.error(f"[NoticeScan][error_handler] 파이프라인 중단 file_path={state['file_path']} reason={state['error_message']}")
         return {
             "extracted_data": {
                 "error": "Pipeline Interrupted",
@@ -145,6 +154,7 @@ class PureLangNoticeScanAgent:
 
     async def run(self, file_path: str) -> Dict[str, Any]:
         """시나리오 가동 엔트리포인트 메소드"""
+        self.logger.info(f"[NoticeScan][run] 파이프라인 시작 file_path={file_path}")
         initial_state: AgentState = {
             "file_path": file_path,
             "file_type": None,
@@ -155,7 +165,9 @@ class PureLangNoticeScanAgent:
             "error_message": None
         }
 
-        return await self.graph.ainvoke(initial_state)
+        final_state = await self.graph.ainvoke(initial_state)
+        self.logger.info(f"[NoticeScan][run] 파이프라인 종료 file_path={file_path} status={final_state.get('status')}")
+        return final_state
 
     async def run_stream(self, file_path: str) -> AsyncGenerator[Dict[str, Any], None]:
         """실시간 진행상태를 SSE 이벤트로 yield하는 스트리밍 엔트리포인트"""
@@ -170,6 +182,7 @@ class PureLangNoticeScanAgent:
         }
 
         # Notify overall start
+        self.logger.info(f"[NoticeScan][run_stream] 파이프라인 시작 file_path={file_path}")
         yield {"type": "progress", "step": "pipeline", "label": "파이프라인", "status": "running", "message": "파이프라인 실행 중..."}
 
         # 컴파일된 워크플로우를 스트리밍합니다: "custom"은 get_stream_writer()를 통해 전달되는
@@ -184,6 +197,7 @@ class PureLangNoticeScanAgent:
                     final_state = payload
         except Exception as e:
             error_message = f"파이프라인 실행 중 예외 발생: {str(e)}"
+            self.logger.error(f"[NoticeScan][run_stream] 파이프라인 예외 file_path={file_path}: {error_message}")
             final_state = {
                 **final_state,
                 "status": "failed",
@@ -192,4 +206,5 @@ class PureLangNoticeScanAgent:
             }
             yield {"type": "progress", "step": "pipeline", "label": "파이프라인", "status": "failed", "message": error_message}
 
+        self.logger.info(f"[NoticeScan][run_stream] 파이프라인 종료 file_path={file_path} status={final_state.get('status')}")
         yield {"type": "result", "data": dict(final_state)}

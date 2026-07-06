@@ -52,8 +52,8 @@ class Settings(BaseSettings):
         if self._llm is None:
             apiBaseUrl = self.API_BASE_URL
             llmModel   = self.LLM_MODEL
-            print("model ========>>>>>>LLM_MODEL = " + llmModel)
-            
+            logger.info(f"[Config] LLM 인스턴스 생성: LLM_MODEL={llmModel}")
+
             if llmModel == "AzureChatOpenAI" :
                 from langchain_openai import AzureChatOpenAI
 
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
         if self._tc_llm is None:
             apiBaseUrl = self.API_BASE_URL
             tcLlmModel   = self.TC_LLM_MODEL
-            print("model ========>>>>>>TC_LLM_MODEL = " + tcLlmModel)
+            logger.info(f"[Config] Tool-Calling LLM 인스턴스 생성: TC_LLM_MODEL={tcLlmModel}")
             
             if tcLlmModel == "AzureChatOpenAI" :
                 from langchain_openai import AzureChatOpenAI
@@ -166,4 +166,7 @@ def get_logger(log_dir="./log",log_filename_prefix="default_log"):
     )
 
     return logging.getLogger(__name__)
-    
+
+
+# Settings 내부(get_llm/get_tc_llm 등)에서 공용으로 사용하는 로거 인스턴스
+logger = get_logger("./log", "llm-server")
