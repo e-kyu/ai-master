@@ -1,66 +1,577 @@
 import re
 import os
+import difflib
+import concurrent.futures
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Optional
 
-from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import IndexNode, TextNode
 from utils import loggerUtil
 
 
 # ============================================================
-# 고정 정규식
+# 경계탐지(boundary-first) 정규식
 #
-# 예전에는 조문/항/별표/부칙 표기마다 후보 정규식을 8~10개씩 나열해두고
-# 문서 표본에서 가장 매칭이 많은 것을 "동적으로" 골라 쓰는 방식이었다.
-# 하지만 이 파이프라인이 실제로 다루는 문서는 전부 조달청 규정/훈령류 한국어
-# 법령이고, 표기 형식은 두 갈래뿐이다.
-#   1) SimpleDirectoryReader로 읽은 PDF 원문 텍스트 (마크다운 장식 없음)
-#   2) tools/convertToMarkdown.py(ConvertToMarkdownAgent)로 변환한 마크다운
-#      - pymupdf4llm/markitdown이 문단마다 헤딩('#')이나 목록 기호('-')를 붙여서
-#        내보낸다. 즉 "## [별표1-1] 제목", "- 제1조(목적) 본문..." 처럼 원문에는
-#        없던 장식이 앞에 붙는다.
-# 두 형식을 각각 분기 처리하면 로직이 두 배로 늘어나므로, _normalize_text()에서
-# 장식만 한 번에 제거해 두 입력을 완전히 같은 모양으로 맞추고, 이후의 정규식/
-# 상태머신은 입력 형식을 몰라도 되도록 만든다. "Article", "Chapter" 같은 국제
-# 문서용 후보나 후보 나열 + 점수 계산(pick_best) 로직은 애초에 불필요해 제거했다.
+# 상태머신으로 줄 단위를 훑는 대신, 전체 텍스트에서 헤더 위치만 먼저
+# finditer로 모두 찾고 그 위치 기준으로 슬라이싱한다. 부칙 -> 별표 -> 조문
+# 순서로 영역을 먼저 통째로 잘라내므로, 부칙 안에 조문과 동일한 표기
+# ("제1조(시행일)")가 나와도 애초에 PAT_JOMUN을 그 영역에 적용하지 않아
+# 오분류가 구조적으로 발생하지 않는다.
 # ============================================================
-_ARTICLE_RE = r'제\d+조(?:의\d+)?\([^\n)]*\)'                       # 제N조(제목) / 제N조의M(제목)
-_PARAGRAPH_RE = r'[①-⑳]'                                          # 항: 원문자 ①②③...
-_ITEM_RE = r'^\s*\d{1,2}\.\s+'                                     # 호: 줄 시작의 "1. " "2. " 등
-_TABLE_HEADER_RE = r'^\[?별표\s*[\d\-]+\]?'                         # 별표 헤딩 (예: "[별표1-1] 제목", "별표 1")
-_BEOPYO_SUB_RE = r'^\d+\.\s*[^\n(]+?(?:\(\s*[\d,]+\s*점\s*\))?\s*$'  # 별표 소제목 (예: "1.수행능력평가(30점)")
-_ADDENDUM_RE = r'^부\s*칙\s*<제?\s*(\S+?)\s*호,?\s*([\d.]+)>'        # 부칙 <제N호, 날짜> (변환 시 "부  칙"처럼 사이가 벌어지기도 함)
-_CROSS_REF_RE = r'(별표\s*\d+|별지\s*제?\s*\d+\s*호?|제\d+조(?:의\d+)?(?:\s*[①-⑳])?)'  # 상호참조 토큰
+PAT_JOMUN = re.compile(r'^제(\d+)조(?:의(\d+))?\(([^\n)]*)\)', re.M)
+PAT_BYEOLPYO = re.compile(r'^\[?별표\s*([\d\-]+)\]?', re.M)
+PAT_BUCHIL = re.compile(r'^부\s*칙\s*[<〈]\s*제?\s*(\S+?)\s*호\s*,?\s*([\d.]+)\s*[>〉]', re.M)
 
-# 마크다운 변환본에서 문단 앞에 붙는 장식들. _normalize_text()가 줄마다 이 장식만
-# 제거하므로, 위 정규식들은 '#'나 '-' 접두어를 신경 쓸 필요가 없다.
-_MD_HEADING_RE = re.compile(r'^\s*#{1,6}\s*')          # "## 제목" -> "제목"
-_MD_BULLET_RE = re.compile(r'^\s*[-*•]\s+')            # "- 제1조(목적)..." -> "제1조(목적)..."
-_MD_PICTURE_PLACEHOLDER_RE = re.compile(r'^\s*\*\*==>.*<==\*\*\s*$')  # 이미지 생략 표시줄(잡음)
+# cross-ref "언급" 추출 전용 (경계탐지용 PAT_JOMUN과 달리 제목이 없어도 매칭)
+REF_PAT = re.compile(r'(별표\s*[\d\-]+|별지\s*제?\s*\d+\s*호?|제\d+조(?:의\d+)?(?:\s*[①-⑳])?(?:제\d+호)?)')
+_TOK_ARTICLE_RE = re.compile(r'^제(\d+)조(?:의(\d+))?\s*([①-⑳])?')
+_TOK_BYEOLPYO_RE = re.compile(r'^별표\s*([\d\-]+)')
+
+# 부칙 시행일 문구
+PAT_EFFECTIVE_LITERAL = re.compile(r'(\d{4})[.\s년]\s*(\d{1,2})[.\s월]\s*(\d{1,2})일?\s*부터\s*시행')
+PAT_EFFECTIVE_ON_PROMULGATION = re.compile(r'공포한\s*날부터\s*시행')
+PAT_EFFECTIVE_AFTER_DAYS = re.compile(r'공포\s*후\s*(\d+)일이?\s*경과한\s*날부터\s*시행')
+
+# 마크다운 변환본 장식 제거용 (v1과 동일)
+_MD_HEADING_RE = re.compile(r'^\s*#{1,6}\s*')
+_MD_BULLET_RE = re.compile(r'^\s*[-*•]\s+')
+_MD_PICTURE_PLACEHOLDER_RE = re.compile(r'^\s*\*\*==>.*<==\*\*\s*$')
+
+# 표/산식 라인 판별 — 헤더 패턴 매칭보다 먼저 검사해서 "가. 50%미만 22.0" 같은
+# 등급행이 목(가.나.다.) 헤더로 오분류되는 것을 막는다.
+_MD_TABLE_ROW_RE = re.compile(r'^\|.*\|$')
+_GRADE_ROW_RE = re.compile(r'^[A-Za-z가-힣]\s*[.\)]?\s*.{0,20}\d+(?:\.\d+)?\s*(?:점|%)')
+_FORMULA_TOKEN_RE = re.compile(r'[×÷±≤≥∑√]|(?<=\d)\s*[/*]\s*(?=\d)')
+
+# 조문 레벨 정규식 (항 -> 호 -> 목 -> 세목). 별표도 같은 스택 규약(_push/_absorb)을
+# 공유하며, "목" 패턴은 별표에서도 그대로 재사용한다.
+LEVEL_PATTERNS_JOMUN = [
+    ("clause", re.compile(r'^([①-⑳])')),
+    ("item", re.compile(r'^(\d+)\.\s')),
+    ("sub", re.compile(r'^([가나다라마바사아자차카타파하])\.\s')),
+    ("subsub", re.compile(r'^(\d+)\)\s')),
+]
+_LEVEL_SUFFIX = {"clause": "항", "item": "호", "sub": "목", "subsub": "세목"}
+
+_DOTTED_RE = re.compile(r'^(\d+(?:\.\d+)+)\.?\s')   # "4.1", "4.1.1" (점이 1개 이상 있어야 함)
+_PLAIN_ITEM_RE = re.compile(r'^(\d+)\.\s')          # "1. 수행능력평가(30점)" 형식 별표 소제목
+_SUB_RE = LEVEL_PATTERNS_JOMUN[2][1]                # 가.나.다. 재사용
+
+DEFAULT_CONFIG = {
+    "max_parent_tokens": 300,
+    "max_child_tokens": 100,
+    "child_overlap_tokens": 15,
+    "parallel_char_threshold": 20000,
+    "reconstruction_min_ratio": 0.995,
+}
+
+CHILD_TEMPLATE = "{law_title} > {breadcrumb}\n내용: {content}"
+
 
 # ============================================================
-# 청크 크기 상한
+# 토큰 카운터 (tiktoken cl100k_base 근사치)
 #
-# 실제 법령 문서는 조문 하나(①②③... 안에 1./2. 호, 가./나. 목, 1)/2) 사이목,
-# 나-1./나-2. 세부항목까지 중첩되기도 하고, 별표는 소수점 번호(4.1, 4.1.1 ...)를
-# 쓰는 다단 채점표가 여러 페이지에 걸치기도 한다. 이 모든 중첩 표기 방식을 정규식
-# 으로 일일이 받아내려 하면 로직이 끝없이 늘어나고 문서마다 또 예외가 생긴다.
-# 대신 "자연스러운 구분자(항/소제목)로 한 번 쪼갠 뒤, 그래도 크면 글자 수 기준
-# 으로 한 번 더 쪼갠다"는 안전장치 하나로 문서 형식과 무관하게 부모/자식 노드
-# 크기를 모두 통제한다. 예전에는 조문/별표 "전체"를 통째로 parent 하나로 만들어서
-# 부모 노드가 페이지 단위로 비대해지고, 그 결과 임베딩 품질과 검색 속도가 함께
-# 나빠졌다 — 부모 크기 상한이 이 문제의 핵심 수정 지점이다.
+# 실제 임베딩 모델(KR-SBERT 등)의 토크나이저와는 다르지만, 모델에 무관하게
+# 쓸 수 있는 가벼운 범용 근사치로 사용한다. buchil 헤더의 "<제3621호, ...>"
+# 처럼 꺾쇠가 포함된 텍스트를 tiktoken이 특수토큰으로 오인해 예외를 던지지
+# 않도록 disallowed_special=()로 비활성화한다.
 # ============================================================
-_MAX_PARENT_CHARS = 1200  # 부모 노드 목표 최대 글자수 - 넘으면 항/소제목 단위로 쪼개 별도 parent로 승격
-_MAX_CHILD_CHARS = 400    # 자식 노드 목표 최대 글자수 - 넘으면 문장 단위로 추가 분할
+_TOKENIZER = None
+
+
+def _get_tokenizer():
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        import tiktoken
+        _TOKENIZER = tiktoken.get_encoding("cl100k_base")
+    return _TOKENIZER
+
+
+def count_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return len(_get_tokenizer().encode(text, disallowed_special=()))
+
+
+def tiktoken_window_split(text: str, max_tokens: int, overlap_tokens: int) -> list:
+    """토큰 슬라이딩 윈도우로 강제 분할한다. cl100k_base는 바이트 레벨 BPE라
+    어느 지점에서 잘라 디코딩해도 깨진 UTF-8이 나오지 않는다."""
+    enc = _get_tokenizer()
+    ids = enc.encode(text, disallowed_special=())
+    if len(ids) <= max_tokens:
+        return [text]
+    step = max(max_tokens - overlap_tokens, 1)
+    pieces, start = [], 0
+    while start < len(ids):
+        end = min(start + max_tokens, len(ids))
+        pieces.append(enc.decode(ids[start:end]))
+        if end == len(ids):
+            break
+        start += step
+    return pieces
+
+
+# ============================================================
+# 입력 정규화 (PDF 원문 / 마크다운 변환본을 같은 모양으로)
+# ============================================================
+def _normalize_text(full_text: str) -> str:
+    lines = []
+    for line in full_text.split("\n"):
+        if _MD_PICTURE_PLACEHOLDER_RE.match(line):
+            continue
+        line = _MD_HEADING_RE.sub('', line)
+        line = _MD_BULLET_RE.sub('', line)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _normalize_date(date_str: str) -> str:
+    cleaned = date_str.strip().rstrip(".")
+    parts = re.split(r'[.\-]', cleaned)
+    if len(parts) == 3 and all(p.isdigit() for p in parts):
+        y, m, d = parts
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    return date_str
+
+
+def _add_days(date_str: str, days: int) -> str:
+    cleaned = date_str.strip().rstrip(".")
+    try:
+        dt = datetime.strptime(cleaned, "%Y.%m.%d")
+    except ValueError:
+        return _normalize_date(date_str)
+    return (dt + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+# ============================================================
+# 표 / 산식 라인 판별
+# ============================================================
+def is_table_line(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return False
+    if _MD_TABLE_ROW_RE.match(s) or _GRADE_ROW_RE.match(s):
+        return True
+    fields = re.split(r'\s{2,}|\t', s)
+    return len(fields) >= 3 and any(re.search(r'\d', f) for f in fields)
+
+
+def is_formula_line(line: str) -> bool:
+    s = line.strip()
+    tokens = len(_FORMULA_TOKEN_RE.findall(s))
+    pct = len(re.findall(r'\d+(?:\.\d+)?\s*%', s))
+    return (tokens + pct) >= 2
+
+
+# ============================================================
+# LawNode — 조문/별표 공용 아웃라인 트리
+# ============================================================
+@dataclass
+class LawNode:
+    level: str
+    number: Optional[str] = None
+    text: str = ""
+    children: list = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
+class ParentGroup:
+    parent_node: LawNode
+    breadcrumb: list
+    child_source_nodes: list
+
+
+def render_full_text(node: LawNode) -> str:
+    parts = [node.text] if node.text else []
+    parts += [render_full_text(c) for c in node.children]
+    return "\n".join(p for p in parts if p)
+
+
+def breadcrumb_label(node: LawNode) -> str:
+    if node.level in _LEVEL_SUFFIX and node.number:
+        marker = node.number.strip()
+        suffix = _LEVEL_SUFFIX[node.level]
+        return marker if marker.endswith(suffix) else f"{marker}{suffix}"
+    first_line = (node.text or "").split("\n", 1)[0].strip()
+    return first_line
+
+
+def _push(stack: list, depth: int, **kwargs) -> LawNode:
+    while len(stack) > depth:
+        stack.pop()
+    while len(stack) < depth:
+        filler = LawNode(level=f"_gap{len(stack)}")
+        stack[-1].children.append(filler)
+        stack.append(filler)
+    node = LawNode(**kwargs)
+    stack[-1].children.append(node)
+    stack.append(node)
+    return node
+
+
+def _absorb(node: LawNode, line: str, is_table: bool, is_formula: bool) -> None:
+    node.text = f"{node.text}\n{line}" if node.text else line
+    if is_table:
+        node.metadata["is_table_block"] = True
+    if is_formula:
+        node.metadata["is_formula_block"] = True
+
+
+def build_outline_jomun(lines: list) -> LawNode:
+    root = LawNode(level="article_body")
+    stack = [root]
+    for raw in lines:
+        t, f = is_table_line(raw), is_formula_line(raw)
+        if t or f:
+            _absorb(stack[-1], raw, t, f)
+            continue
+        line = raw.strip()
+        matched = False
+        for depth, (level_name, pat) in enumerate(LEVEL_PATTERNS_JOMUN, start=1):
+            m = pat.match(line)
+            if m:
+                _push(stack, depth, level=level_name, number=m.group(1), text=raw)
+                matched = True
+                break
+        if not matched:
+            _absorb(stack[-1], raw, False, False)
+    return root
+
+
+def dotted_depth(number: str) -> int:
+    return number.count(".") + 1
+
+
+def build_outline_byeolpyo(lines: list) -> LawNode:
+    root = LawNode(level="byeolpyo_root")
+    stack = [root]
+    for raw in lines:
+        t, f = is_table_line(raw), is_formula_line(raw)
+        if t or f:
+            _absorb(stack[-1], raw, t, f)
+            continue
+        line = raw.strip()
+        m = _DOTTED_RE.match(line)
+        if m:
+            depth = dotted_depth(m.group(1))
+            _push(stack, depth, level=f"L{depth}", number=m.group(1), text=raw)
+            continue
+        m = _PLAIN_ITEM_RE.match(line)
+        if m:
+            _push(stack, 1, level="byeolpyo_item", number=m.group(1), text=raw)
+            continue
+        m = _SUB_RE.match(line)
+        if m:
+            _push(stack, 2, level="byeolpyo_sub", number=m.group(1), text=raw)
+            continue
+        _absorb(stack[-1], raw, False, False)
+    return root
+
+
+# ============================================================
+# 경계탐지 우선 분리
+# ============================================================
+def split_top_level(full_text: str) -> dict:
+    buchil_hits = list(PAT_BUCHIL.finditer(full_text))
+    buchil_start = buchil_hits[0].start() if buchil_hits else len(full_text)
+    body_text = full_text[:buchil_start]
+    buchil_text = full_text[buchil_start:]
+
+    byeolpyo_hits = list(PAT_BYEOLPYO.finditer(body_text))
+    byeolpyo_start = byeolpyo_hits[0].start() if byeolpyo_hits else len(body_text)
+    jomun_text = body_text[:byeolpyo_start]
+    byeolpyo_text = body_text[byeolpyo_start:]
+
+    return {"jomun": jomun_text, "byeolpyo": byeolpyo_text, "buchil": buchil_text}
+
+
+def _slice_by_hits(text: str, hits: list) -> list:
+    spans = []
+    for i, h in enumerate(hits):
+        end = hits[i + 1].start() if i + 1 < len(hits) else len(text)
+        spans.append((h, text[h.start():end]))
+    return spans
+
+
+def split_jomun_articles(jomun_text: str):
+    hits = list(PAT_JOMUN.finditer(jomun_text))
+    if not hits:
+        return jomun_text.strip(), []
+    intro = jomun_text[:hits[0].start()].strip()
+    return intro, _slice_by_hits(jomun_text, hits)
+
+
+def split_byeolpyo_tables(byeolpyo_text: str) -> list:
+    return _slice_by_hits(byeolpyo_text, list(PAT_BYEOLPYO.finditer(byeolpyo_text)))
+
+
+def split_buchil_entries(buchil_text: str) -> list:
+    return _slice_by_hits(buchil_text, list(PAT_BUCHIL.finditer(buchil_text)))
+
+
+# ============================================================
+# 조문 / 별표 루트 빌드 (헤더 분리 + 아웃라인 빌더 호출)
+# ============================================================
+def _build_article_root(m: re.Match, span_text: str):
+    header_text = m.group(0)
+    title = (m.group(3) or "").strip()
+    num, sub = m.group(1), m.group(2)
+    remainder = span_text[len(header_text):]
+    first_newline = remainder.find("\n")
+    if first_newline == -1:
+        body_lines = [remainder.strip()] if remainder.strip() else []
+    else:
+        first_line_remainder = remainder[:first_newline].strip()
+        rest_lines = remainder[first_newline + 1:].split("\n")
+        body_lines = ([first_line_remainder] if first_line_remainder else []) + rest_lines
+
+    root = build_outline_jomun(body_lines)
+    root.text = f"{header_text}\n{root.text}" if root.text else header_text
+    root.level = "article"
+    root.number = header_text
+    article_no = f"제{num}조" + (f"의{sub}" if sub else "")
+    meta = {"article_no": article_no, "article_title": title, "doc_type": "조문"}
+    return root, meta
+
+
+def _build_byeolpyo_root(m: re.Match, span_text: str):
+    header_line_end = span_text.find("\n")
+    if header_line_end == -1:
+        header_text, body_lines = span_text.strip(), []
+    else:
+        header_text = span_text[:header_line_end].strip()
+        body_lines = span_text[header_line_end + 1:].split("\n")
+
+    root = build_outline_byeolpyo(body_lines)
+    root.text = f"{header_text}\n{root.text}" if root.text else header_text
+    root.level = "byeolpyo_root"
+    root.number = header_text
+    table_no = f"별표{m.group(1)}"
+    meta = {"table_no": table_no, "table_title": header_text, "doc_type": "별표"}
+    return root, meta
+
+
+# ============================================================
+# 부칙 시행일 파싱
+# ============================================================
+def parse_buchil_dates(entry_text: str, published_date_raw: str) -> dict:
+    published_date = _normalize_date(published_date_raw)
+    sentences = re.split(r'(?<=[.다])\s*\n|(?<=시행한다\.)\s*', entry_text)
+    primary, exceptions = None, []
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        eff = None
+        if PAT_EFFECTIVE_ON_PROMULGATION.search(sent):
+            eff = published_date
+        else:
+            m = PAT_EFFECTIVE_AFTER_DAYS.search(sent)
+            if m:
+                eff = _add_days(published_date_raw, int(m.group(1)))
+            else:
+                m = PAT_EFFECTIVE_LITERAL.search(sent)
+                if m:
+                    eff = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+        if not eff:
+            continue
+        if primary is None:
+            primary = eff
+        else:
+            exceptions.append({"scope": sent, "effective_date": eff})
+    return {
+        "published_date": published_date,
+        "effective_date": primary or published_date,
+        "effective_date_exceptions": exceptions,
+    }
+
+
+# ============================================================
+# Parent/Child 변환 — 토큰 기준 재귀 승격
+# ============================================================
+def to_parent_child(node: LawNode, breadcrumb: list, cfg: dict) -> list:
+    full_text = render_full_text(node)
+    protected = bool(node.metadata.get("is_table_block") or node.metadata.get("is_formula_block"))
+    if not node.children or protected or count_tokens(full_text) <= cfg["max_parent_tokens"]:
+        child_sources = node.children if node.children else [
+            LawNode(level=f"{node.level}_leaf", text=node.text, metadata=dict(node.metadata))
+        ]
+        return [ParentGroup(node, list(breadcrumb), child_sources)]
+
+    groups = []
+    preface = node.text
+    for child in node.children:
+        sub_groups = to_parent_child(child, breadcrumb + [breadcrumb_label(child)], cfg)
+        if preface and sub_groups:
+            first = sub_groups[0].parent_node
+            first.text = f"{preface}\n{first.text}" if first.text else preface
+            preface = ""
+        groups.extend(sub_groups)
+    return groups
+
+
+def materialize_parent_group(group: ParentGroup, law_title: str, doc_type: str, cfg: dict):
+    parent_text = render_full_text(group.parent_node)
+    parent_metadata = {
+        "law_title": law_title,
+        "doc_type": doc_type,
+        "type": "parent",
+        "breadcrumb": " > ".join(group.breadcrumb),
+    }
+    parent_metadata.update(group.parent_node.metadata)
+    if group.parent_node.level == "clause" and group.parent_node.number:
+        parent_metadata["clause_marker"] = group.parent_node.number
+
+    parent_tn = TextNode(text=parent_text, metadata=parent_metadata)
+    parent_tn.metadata["_cross_ref_surface_tokens"] = [m.group(0) for m in REF_PAT.finditer(parent_text)]
+
+    children = []
+    for src in group.child_source_nodes:
+        text = render_full_text(src)
+        if not text.strip():
+            continue
+        protected = bool(src.metadata.get("is_table_block") or src.metadata.get("is_formula_block"))
+        if protected or count_tokens(text) <= cfg["max_child_tokens"]:
+            pieces = [text]
+        else:
+            pieces = tiktoken_window_split(text, cfg["max_child_tokens"], cfg["child_overlap_tokens"])
+
+        for idx, piece in enumerate(pieces):
+            label = breadcrumb_label(src)
+            if len(pieces) > 1:
+                label = f"{label} ({idx + 1}/{len(pieces)})"
+            breadcrumb_str = " > ".join(group.breadcrumb + [label])
+            child_metadata = {
+                "law_title": law_title,
+                "doc_type": doc_type,
+                "type": "child",
+                "breadcrumb": breadcrumb_str,
+            }
+            child_metadata.update(src.metadata)
+            child_metadata["_cross_ref_surface_tokens"] = [m.group(0) for m in REF_PAT.finditer(piece)]
+            child_tn = TextNode(
+                text=CHILD_TEMPLATE.format(law_title=law_title, breadcrumb=breadcrumb_str, content=piece),
+                metadata=child_metadata,
+            )
+            children.append(IndexNode.from_text_node(child_tn, index_id=parent_tn.node_id))
+    return parent_tn, children
+
+
+# ============================================================
+# Cross-reference 2-pass 해결
+# ============================================================
+def _resolve_token(tok: str, article_index: dict, article_paragraph_index: dict, byeolpyo_index: dict) -> list:
+    tok = tok.strip()
+    m = _TOK_BYEOLPYO_RE.match(tok)
+    if m:
+        return list(byeolpyo_index.get(f"별표{m.group(1)}", []))
+    m = _TOK_ARTICLE_RE.match(tok)
+    if m:
+        article_no = f"제{m.group(1)}조" + (f"의{m.group(2)}" if m.group(2) else "")
+        clause = m.group(3)
+        if clause:
+            node_id = article_paragraph_index.get((article_no, clause))
+            if node_id:
+                return [node_id]
+        return list(article_index.get(article_no, []))
+    return []
+
+
+def resolve_cross_refs(parent_nodes: list, article_index: dict, article_paragraph_index: dict, byeolpyo_index: dict) -> None:
+    for node in parent_nodes:
+        tokens = node.metadata.pop("_cross_ref_surface_tokens", [])
+        resolved, unresolved = [], []
+        for tok in tokens:
+            ids = _resolve_token(tok, article_index, article_paragraph_index, byeolpyo_index)
+            if ids:
+                resolved.extend(ids)
+            else:
+                unresolved.append(tok)
+        node.metadata["cross_refs"] = sorted(set(resolved) - {node.node_id})
+        node.metadata["cross_refs_unresolved"] = sorted(set(unresolved))
+
+
+# ============================================================
+# 영역별 워커 — ProcessPoolExecutor로 보낼 수 있도록 모듈 최상위 함수로 두고
+# 원시 자료형(str/dict)과 LawNode/ParentGroup 같은 순수 dataclass만 주고받는다.
+# self.logger(파일 핸들을 쥔 객체)는 pickling이 안 되므로 워커 안에서는 절대
+# 로깅하지 않고, 경고 메시지를 문자열로 모아 반환해 부모 프로세스가 로깅한다.
+# ============================================================
+def _process_region_worker(region_name: str, region_text: str, law_title: str, cfg: dict) -> dict:
+    normalized = _normalize_text(region_text)
+    warnings = []
+    result = {"region": region_name, "warnings": warnings}
+
+    if region_name == "jomun":
+        intro, spans = split_jomun_articles(normalized)
+        reconstructed_parts = [intro] if intro else []
+        articles = []
+        for m, span_text in spans:
+            root, meta = _build_article_root(m, span_text)
+            reconstructed_parts.append(render_full_text(root))
+            groups = to_parent_child(root, [breadcrumb_label(root)], cfg)
+            for g in groups:
+                g.parent_node.metadata = {**meta, **g.parent_node.metadata}
+            articles.append({"groups": groups})
+        ratio = difflib.SequenceMatcher(None, "\n".join(reconstructed_parts).strip(), normalized.strip()).ratio()
+        ok = ratio >= cfg["reconstruction_min_ratio"]
+        if not ok:
+            warnings.append(f"[{law_title}] 조문 영역 텍스트 유실 의심 - 일치율 {ratio:.4f}")
+        result.update({"intro_text": intro, "articles": articles, "ratio": ratio, "ok": ok})
+
+    elif region_name == "byeolpyo":
+        spans = split_byeolpyo_tables(normalized)
+        reconstructed_parts = []
+        tables = []
+        for m, span_text in spans:
+            root, meta = _build_byeolpyo_root(m, span_text)
+            reconstructed_parts.append(render_full_text(root))
+            groups = to_parent_child(root, [breadcrumb_label(root)], cfg)
+            for g in groups:
+                g.parent_node.metadata = {**meta, **g.parent_node.metadata}
+            tables.append({"groups": groups})
+        ratio = difflib.SequenceMatcher(None, "\n".join(reconstructed_parts).strip(), normalized.strip()).ratio()
+        ok = ratio >= cfg["reconstruction_min_ratio"]
+        if not ok:
+            warnings.append(f"[{law_title}] 별표 영역 텍스트 유실 의심 - 일치율 {ratio:.4f}")
+        result.update({"tables": tables, "ratio": ratio, "ok": ok})
+
+    else:  # buchil
+        spans = split_buchil_entries(normalized)
+        reconstructed_parts = []
+        entries = []
+        for idx, (m, span_text) in enumerate(spans):
+            law_no, published_date_raw = m.group(1), m.group(2)
+            text = span_text.strip()
+            reconstructed_parts.append(text)
+            dates = parse_buchil_dates(span_text, published_date_raw)
+            entries.append({
+                "text": text,
+                "law_no": law_no,
+                "is_latest": idx == len(spans) - 1,
+                **dates,
+            })
+        ratio = difflib.SequenceMatcher(None, "\n".join(reconstructed_parts).strip(), normalized.strip()).ratio()
+        ok = ratio >= cfg["reconstruction_min_ratio"]
+        if not ok:
+            warnings.append(f"[{law_title}] 부칙 영역 텍스트 유실 의심 - 일치율 {ratio:.4f}")
+        result.update({"entries": entries, "ratio": ratio, "ok": ok})
+
+    return result
 
 
 class LawChunker:
     """
-    한국 법령/훈령류 문서(조문-항-호 / 별표 / 부칙 구조)를 Parent-Child 계층으로 청킹한다.
+    한국 법령/훈령류 문서(조문-항-호-목-세목 / 별표 / 부칙 구조)를 Parent-Child
+    계층으로 청킹한다. 경계탐지(boundary-first) 분리 + 조문/별표 공용 아웃라인
+    빌더 + 토큰 기준 크기 제어로 동작한다(v2).
 
     사용 흐름:
         chunker = LawChunker()
-        stats = chunker.detect_structure(llama_docs)   # 이 문서에 조문/별표가 실제로 있는지만 확인
+        stats = chunker.detect_structure(llama_docs)
         if stats["has_article"] or stats["has_byeolpyo"]:
             all_nodes, node_dict = chunker.parse_to_hierarchical_nodes(llama_docs)
         else:
@@ -68,42 +579,21 @@ class LawChunker:
             all_nodes, node_dict = fallback_chunker.create_fallback_nodes(llama_docs)
     """
 
-    def __init__(self, sample_size=10):
+    def __init__(self, cfg: dict = None):
         self.logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
-        self.sample_size = sample_size
-        # 항/소제목으로 쪼갠 뒤에도 _MAX_CHILD_CHARS를 넘는 조각을 추가로 잘라내는 안전장치.
-        self._size_splitter = SentenceSplitter(chunk_size=_MAX_CHILD_CHARS, chunk_overlap=40)
-
-    def _cap_text(self, text: str, max_chars: int) -> list:
-        """
-        text가 max_chars 이내면 그대로 1개, 넘으면 문장 단위로 추가 분할해 여러 조각으로
-        반환한다. 항/호/목/사이목처럼 문서마다 제각각인 중첩 표기를 전부 정규식으로
-        받아내는 대신, 이 크기 기준 안전장치 하나로 어떤 문서든 청크 크기를 보장한다.
-        """
-        text = text.strip()
-        if not text:
-            return []
-        if len(text) <= max_chars:
-            return [text]
-        pieces = [p.strip() for p in self._size_splitter.split_text(text) if p.strip()]
-        return pieces or [text]
+        self.cfg = {**DEFAULT_CONFIG, **(cfg or {})}
 
     # ============================================================
-    # 1. 문서 구조 탐지
-    #    정규식이 고정값이므로 "탐지"라는 이름과 달리 실제로 하는 일은
-    #    표본 텍스트에서 각 패턴이 몇 번 매칭되는지 세는 것뿐이다.
-    #    이 결과로 "조문 기반 파싱을 시도할지 / 기본 SentenceSplitter로
-    #    폴백할지"만 판단하면 충분하다.
+    # 1. 문서 구조 탐지 — 표본 없이 전문(全文) 1-pass 스캔
     # ============================================================
-    def detect_structure(self, llama_docs):
-        sample = self._sample_text(llama_docs)
-
-        article_matches = len(re.findall(_ARTICLE_RE, sample))
-        table_matches = len(re.findall(_TABLE_HEADER_RE, sample, re.MULTILINE))
-        addendum_matches = len(re.findall(_ADDENDUM_RE, sample, re.MULTILINE))
+    def detect_structure(self, llama_docs) -> dict:
+        normalized = _normalize_text("\n".join(d.text for d in llama_docs))
+        article_matches = len(list(PAT_JOMUN.finditer(normalized)))
+        table_matches = len(list(PAT_BYEOLPYO.finditer(normalized)))
+        addendum_matches = len(list(PAT_BUCHIL.finditer(normalized)))
 
         self.logger.info(
-            f"[LawChunker] 구조 탐지 결과 - 조문:{article_matches} "
+            f"[LawChunker] 구조 탐지 결과(전문 스캔) - 조문:{article_matches} "
             f"별표:{table_matches} 부칙:{addendum_matches}"
         )
 
@@ -116,445 +606,156 @@ class LawChunker:
             "addendum_matches": addendum_matches,
         }
 
-    def _sample_text(self, llama_docs):
-        """문서 페이지가 많으면 균등 간격으로 sample_size개만 뽑아 탐지 비용을 줄인다."""
-        if not llama_docs:
-            return ""
-        if len(llama_docs) <= self.sample_size:
-            texts = [doc.text for doc in llama_docs]
-        else:
-            step = len(llama_docs) / self.sample_size
-            indices = [min(int(i * step), len(llama_docs) - 1) for i in range(self.sample_size)]
-            texts = [llama_docs[idx].text for idx in indices]
-        return self._normalize_text("\n".join(texts))
+    def _extract_law_title(self, llama_docs):
+        file_name, law_title = None, "답변자료"
+        if llama_docs:
+            first_meta = getattr(llama_docs[0], "metadata", {}) or {}
+            if isinstance(first_meta, dict):
+                file_name = first_meta.get("file_name")
+                if file_name:
+                    law_title = os.path.splitext(file_name)[0]
+        return file_name, law_title
 
     # ============================================================
-    # 0-1. PDF 원문 텍스트 / 마크다운 변환본을 같은 모양으로 맞추는 전처리
-    #      (조문/별표/부칙 탐지·분리 로직 전체가 이 정규화된 텍스트만 보고 동작한다)
-    # ============================================================
-    def _normalize_text(self, full_text):
-        """
-        pymupdf4llm/markitdown으로 변환된 마크다운은 문단마다 헤딩('#') 또는 목록
-        기호('-')가 붙어 나오고, 이미지가 있던 자리에는 "**==> picture ... <==**"
-        같은 잡음 줄이 끼어든다. 반면 SimpleDirectoryReader가 읽은 PDF 원문 텍스트는
-        이런 장식이 전혀 없다.
-
-        조문/별표/부칙 탐지는 전부 "줄 시작이 어떤 패턴인가"를 기준으로 동작하므로,
-        입력이 어느 쪽이든 여기서 장식만 제거해 두 형식을 완전히 같은 모양으로
-        맞춘다. 이렇게 하면 뒤따르는 _split_into_sections/_parse_* 로직은 입력이
-        PDF인지 마크다운인지 전혀 신경 쓸 필요가 없어진다.
-        """
-        lines = []
-        dropped_pictures = 0
-        for line in full_text.split("\n"):
-            if _MD_PICTURE_PLACEHOLDER_RE.match(line):
-                dropped_pictures += 1
-                continue
-            line = _MD_HEADING_RE.sub('', line)
-            line = _MD_BULLET_RE.sub('', line)
-            lines.append(line)
-
-        if dropped_pictures:
-            self.logger.debug(f"[LawChunker] 이미지 생략 표시줄 {dropped_pictures}개 제거")
-
-        return "\n".join(lines)
-
-    # ============================================================
-    # 2. 섹션 분류 상태머신
-    #    줄 단위로 훑으며 조문 / 별표 / 부칙 / intro(서두) 섹션으로 나눈다.
+    # 2. 메인 파서
     #
-    #    re.split을 한 번에 돌리는 대신 상태머신을 쓰는 이유:
-    #    부칙 문구 안에는 "제1조(시행일)", "제2조(...)"처럼 본문 조문과 똑같은
-    #    형식의 하위 조항이 들어있다. 현재 상태가 "부칙"인 동안 조문 헤더를
-    #    만나도 새 섹션으로 취급하지 않고 부칙 본문에 그대로 흡수시켜야, 부칙의
-    #    "제1조"가 본문의 진짜 "제1조(목적)"와 뒤섞여 별개 조문으로 잘못
-    #    쪼개지는 것을 막을 수 있다.
-    # ============================================================
-    def _split_into_sections(self, full_text: str):
-        # PDF 원문/마크다운 변환본을 같은 모양으로 맞춘 뒤 한 줄씩 훑는다.
-        full_text = self._normalize_text(full_text)
-
-        article_re = re.compile(_ARTICLE_RE)
-        table_re = re.compile(_TABLE_HEADER_RE, re.MULTILINE)
-        addendum_re = re.compile(_ADDENDUM_RE, re.MULTILINE)
-
-        # 별표/부칙 번호 추출용 (헤더 정규식이 그룹을 못 잡는 경우를 대비한 보강 정규식).
-        # 별표는 "별표1-1"처럼 하이픈 붙은 하위 번호까지 그대로 잡아야 서로 다른
-        # 하위 표(1-1, 1-2 ...)가 같은 table_no로 뭉개지지 않는다.
-        table_no_re = re.compile(r'별표\s*([\d\-]+)')
-        addendum_no_re = re.compile(r'제?\s*(\S+?)\s*호,?\s*([\d.]+)')
-
-        lines = full_text.split("\n")
-        sections = []
-        current = {"type": "intro", "header": "", "body": [], "meta": {}}
-
-        def flush():
-            if current["body"] or current["header"]:
-                current["body"] = "\n".join(current["body"]).strip()
-                sections.append(current.copy())
-
-        for line in lines:
-            stripped = line.strip()
-
-            # 정규화(_normalize_text)로 '#'/'-' 장식은 이미 제거됐지만 일반적인
-            # 들여쓰기 공백은 남아있을 수 있어, 앞뒤 공백을 걷어낸 stripped를
-            # 기준으로 매칭한다.
-            m_table = table_re.match(stripped)
-            m_addendum = addendum_re.match(stripped)
-            # "제"로 시작하는 줄만 조문 정규식을 검사해 불필요한 매칭 시도를 줄인다.
-            # search가 아닌 match를 써서 줄 맨 앞에서부터 정확히 조문 제목과 일치할
-            # 때만 헤더로 인정한다(예: "제1조 관련 제2조(목적)..." 같은 본문 중간의
-            # 조문 참조가 새 섹션으로 잘못 끊기지 않도록).
-            m_article = article_re.match(stripped) if stripped.startswith("제") else None
-
-            if m_table:
-                flush()
-                no_match = table_no_re.search(line)
-                current = {
-                    "type": "별표",
-                    "header": stripped,
-                    "body": [],
-                    "meta": {"table_no": f"별표{no_match.group(1)}" if no_match else stripped},
-                }
-                continue
-
-            if m_addendum:
-                flush()
-                no_match = addendum_no_re.search(line)
-                current = {
-                    "type": "부칙",
-                    "header": stripped,
-                    "body": [],
-                    "meta": {
-                        "addendum_no": no_match.group(1) if no_match else None,
-                        "addendum_date": no_match.group(2) if no_match else None,
-                    },
-                }
-                continue
-
-            # 별표/부칙 내부에서는 조문과 같은 표기가 나와도 새 섹션을 만들지 않는다.
-            if m_article and current["type"] not in ("별표", "부칙"):
-                flush()
-                # PDF 원문/마크다운 변환본 모두 조문 제목과 첫 문장이 같은 줄에
-                # 붙어 나온다(예: "제1조(목적) 이 규정은 ...을 목적으로 한다.").
-                # 제목만 header로 뽑아내고, 뒤에 남은 문장은 버리지 않고 본문의
-                # 첫 줄로 편입시킨다. 그렇지 않으면 짧은 조문은 항/호 분할 대상인
-                # content가 비어버려 자식 노드가 아예 만들어지지 않는다.
-                header_text = m_article.group(0)
-                remainder = stripped[m_article.end():].strip()
-                current = {
-                    "type": "조문",
-                    "header": header_text,
-                    "body": [remainder] if remainder else [],
-                    "meta": {
-                        "article_no": header_text,
-                        "article_title": header_text,
-                    },
-                }
-                continue
-
-            current["body"].append(line)
-
-        flush()
-
-        # 부칙이 여러 개면 마지막 부칙만 "현재 유효한 개정"으로 표시한다.
-        addendum_indices = [i for i, s in enumerate(sections) if s["type"] == "부칙"]
-        for i in addendum_indices:
-            sections[i]["meta"]["is_latest"] = (i == addendum_indices[-1])
-
-        self.logger.debug(
-            f"[LawChunker] 섹션 분리 완료 - 총 {len(sections)}개 "
-            f"(조문:{sum(1 for s in sections if s['type'] == '조문')} "
-            f"별표:{sum(1 for s in sections if s['type'] == '별표')} "
-            f"부칙:{len(addendum_indices)})"
-        )
-        return sections
-
-    # ============================================================
-    # 3. cross-ref 추출: 본문 안에서 "별표 N", "제N조" 같은 상호참조 토큰을 모은다.
-    # ============================================================
-    def _extract_cross_refs(self, text: str):
-        refs = set()
-        for m in re.finditer(_CROSS_REF_RE, text):
-            token = m.group(0).strip()
-            if not token:
-                continue
-            nums = re.findall(r'별표\s*(\d+)', token)
-            if nums:
-                for n in nums:
-                    refs.add(f"별표{n}")
-            else:
-                refs.add(re.sub(r'\s+', '', token))
-        return sorted(refs)
-
-    # ============================================================
-    # 4. 별표 섹션 파서
-    #    별표 전체(표+세부규정)가 이미 작으면 기존처럼 별표 전체를 하나의 parent로
-    #    쓴다. 하지만 [별표 1]처럼 여러 페이지에 걸친 채점표는 별표 전체를 parent
-    #    하나로 만들면 부모 노드가 지나치게 비대해져 임베딩/검색 속도가 나빠진다.
-    #    이 경우 감지된 소제목(예: "1. 수행능력 평가(30점)") 단위로 parent를 여러
-    #    개로 쪼개고, 소제목이 아예 없으면 크기 기준으로만 잘라 여러 parent를
-    #    만든다 — 표 구조를 보존하려던 기존 "단일 child로 전체 보존" 전략은
-    #    다단 채점표에서는 오히려 검색을 느리게 만들므로 더 이상 쓰지 않는다.
-    #    반환값은 (parent_node, child_nodes) 쌍의 리스트다.
-    # ============================================================
-    def _parse_byeolpyo_section(self, section, law_title):
-        table_no = section["meta"]["table_no"]
-        header = section["header"]
-        body = section["body"]
-        full_text = f"{header}\n{body}".strip()
-
-        sub_re = re.compile(_BEOPYO_SUB_RE, re.MULTILINE)
-        matches = list(sub_re.finditer(body))
-
-        if len(full_text) <= _MAX_PARENT_CHARS or not matches:
-            return [self._build_byeolpyo_parent(table_no, header, body, law_title)]
-
-        # 소제목 단위로 쪼개 각 소제목을 독립된(더 작은) parent로 승격시킨다.
-        results = []
-        preface = body[: matches[0].start()].strip() if matches[0].start() > 0 else ""
-
-        for idx, m in enumerate(matches):
-            sub_title = m.group(0).strip()
-            start = m.end()
-            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(body)
-            sub_content = body[start:end].strip()
-            if preface:
-                sub_content = f"{preface}\n{sub_content}".strip()
-                preface = ""  # 서두 문구는 첫 소제목에만 한 번 붙인다
-            results.append(
-                self._build_byeolpyo_parent(
-                    table_no, f"{header} - {sub_title}", sub_content, law_title, section_title=sub_title
-                )
-            )
-
-        self.logger.debug(f"[LawChunker] 별표 '{table_no}' 크기 초과로 소제목 {len(results)}개 parent로 분할")
-        return results
-
-    def _build_byeolpyo_parent(self, table_no, header, content, law_title, section_title=None):
-        """별표(또는 별표 소제목) 하나를 parent 노드 1개 + 크기 상한을 지킨 child 노드들로 만든다."""
-        full_text = f"{header}\n{content}".strip()
-        parent_node = TextNode(
-            text=full_text,
-            metadata={
-                "law_title": law_title,
-                "doc_type": "별표",
-                "table_no": table_no,
-                "table_title": header,
-                "section": section_title,
-                "type": "parent",
-                "cross_refs": self._extract_cross_refs(full_text),
-            },
-        )
-
-        pieces = self._cap_text(content, _MAX_CHILD_CHARS)
-        child_nodes = []
-        for idx, piece in enumerate(pieces):
-            label = section_title or header
-            if len(pieces) > 1:
-                label = f"{label} ({idx + 1}/{len(pieces)})"
-            contextualized_text = (
-                f"별표: {table_no} ({header})\n"
-                f"구분: {label}\n"
-                f"내용:\n{piece}"
-            )
-            child_node = TextNode(
-                text=contextualized_text,
-                metadata={
-                    "law_title": law_title,
-                    "doc_type": "별표",
-                    "table_no": table_no,
-                    "table_title": header,
-                    "section": label,
-                    "type": "child",
-                    "contains_table": "|" in piece,
-                    "cross_refs": self._extract_cross_refs(piece),
-                },
-            )
-            i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
-            child_nodes.append(i_node)
-
-        self.logger.debug(f"[LawChunker] 별표 '{table_no}' ({header}) 파싱 완료 - child {len(child_nodes)}개")
-        return parent_node, child_nodes
-
-    # ============================================================
-    # 5. 조문 섹션 파서
-    #    조문 전체(제목+①~⑨ 전부)가 이미 작으면 기존처럼 조문 전체를 하나의
-    #    parent로 쓴다. 하지만 항이 여러 개거나 항 하나에 호/목/사이목까지 깊게
-    #    중첩된 조문(예: 제2조③이 1.~7.호, 그 안에 가.~아.목까지 갖는 경우)은
-    #    조문 전체를 parent 하나로 만들면 부모 노드가 지나치게 비대해진다.
-    #    이 경우 항(①②③...) 단위로 parent를 여러 개로 쪼갠다. 항조차 없는
-    #    조문은 기존처럼 조문 전체가 parent다. 각 parent 안에서는 호(1. 2. 3.)로
-    #    한 번 더 나누고, 그래도 크면 크기 상한(_cap_text)으로 추가 분할한다 —
-    #    가/나/목이나 사이목, 소수점 번호 같은 세부 표기까지 정규식으로 쫓아가는
-    #    대신 이 크기 상한이 안전망 역할을 한다.
-    #    반환값은 (parent_node, child_nodes) 쌍의 리스트다.
-    # ============================================================
-    def _parse_article_section(self, section, law_title):
-        article_no = section["meta"].get("article_no")
-        title = section["meta"]["article_title"]
-        header = section["header"]
-        content = section["body"]
-        full_text = f"{header}\n{content}".strip()
-
-        if len(full_text) <= _MAX_PARENT_CHARS or not re.search(_PARAGRAPH_RE, content):
-            return [self._build_article_parent(header, title, article_no, content, law_title)]
-
-        # 항(①②③...) 단위로 쪼개 각 항을 독립된(더 작은) parent로 승격시킨다.
-        paragraph_re = re.compile(f'({_PARAGRAPH_RE})')
-        parts = paragraph_re.split(content)
-
-        preface = ""
-        if parts and not paragraph_re.match(parts[0].strip()):
-            preface = parts.pop(0).strip()
-
-        results = []
-        for j in range(0, len(parts), 2):
-            if j + 1 >= len(parts):
-                continue
-            marker = parts[j].strip()
-            para_content = parts[j + 1].strip()
-            if preface:
-                para_content = f"{preface}\n{para_content}".strip()
-                preface = ""  # 서두 문구는 첫 항에만 한 번 붙인다
-            results.append(
-                self._build_article_parent(
-                    f"{header} {marker}", f"{title} {marker}", article_no, para_content,
-                    law_title, paragraph_no=marker,
-                )
-            )
-
-        self.logger.debug(f"[LawChunker] {title} 크기 초과로 항 {len(results)}개 parent로 분할")
-        return results
-
-    def _build_article_parent(self, header, title, article_no, content, law_title, paragraph_no=None):
-        """조문(또는 조문의 항 하나) 을 parent 노드 1개 + 크기 상한을 지킨 child 노드들로 만든다."""
-        full_text = f"{header}\n{content}".strip()
-        parent_node = TextNode(
-            text=full_text,
-            metadata={
-                "law_title": law_title,
-                "doc_type": "조문",
-                "article_no": article_no,
-                "article_title": title,
-                "paragraph_no": paragraph_no,
-                "type": "parent",
-                "cross_refs": self._extract_cross_refs(full_text),
-            },
-        )
-
-        if re.search(_ITEM_RE, content, re.MULTILINE):
-            item_re = re.compile(f'({_ITEM_RE})', re.MULTILINE)
-            parts = item_re.split(content)
-            child_chunks = []
-            if parts and not item_re.match(parts[0].strip()):
-                first_text = parts.pop(0).strip()
-                if first_text:
-                    child_chunks.append(("", first_text))
-            for j in range(0, len(parts), 2):
-                if j + 1 < len(parts):
-                    child_chunks.append((parts[j].strip(), parts[j + 1].strip()))
-        else:
-            # 호 구분이 없으면 본문 전체를 하나의 조각으로 두고, 크기 상한이 필요시 나눈다.
-            child_chunks = [("", content.strip())] if content.strip() else []
-
-        child_nodes = []
-        for marker, chunk in child_chunks:
-            if not chunk.strip():
-                continue
-            pieces = self._cap_text(chunk, _MAX_CHILD_CHARS)
-            for idx, piece in enumerate(pieces):
-                breadcrumb = title + (f" {marker}" if marker else "")
-                if len(pieces) > 1:
-                    breadcrumb = f"{breadcrumb} ({idx + 1}/{len(pieces)})"
-                # 자식 검색 시 상위 맥락 유실을 막기 위해 법률명/조항 정보를 본문 앞에 주입한다.
-                contextualized_text = (
-                    f"법률명: {law_title}\n"
-                    f"조항: {breadcrumb}\n"
-                    f"내용: {piece}"
-                )
-                child_node = TextNode(
-                    text=contextualized_text,
-                    metadata={
-                        "law_title": law_title,
-                        "doc_type": "조문",
-                        "article_no": article_no,
-                        "article_title": title,
-                        "paragraph_no": paragraph_no,
-                        "item_no": marker,
-                        "breadcrumb": breadcrumb,
-                        "type": "child",
-                        "cross_refs": self._extract_cross_refs(piece),
-                    },
-                )
-                i_node = IndexNode.from_text_node(child_node, index_id=parent_node.node_id)
-                child_nodes.append(i_node)
-
-        self.logger.debug(f"[LawChunker] {title} 파싱 완료 - child {len(child_nodes)}개")
-        return parent_node, child_nodes
-
-    # ============================================================
-    # 6. 메인 파서: 문서 전체를 섹션으로 나눈 뒤 섹션 타입별로 위임한다.
+    # llama_docs를 하나로 합쳐서 처리하면 여러 파일(zip/디렉토리 입력)이 섞였을 때
+    # A 파일의 부칙 뒤에 B 파일의 조문/별표가 붙어버려 경계탐지가 통째로 깨진다
+    # (split_top_level은 "첫 부칙 등장 지점 이후 전부"를 부칙 영역으로 간주하므로).
+    # 이를 막기 위해 doc(파일) 단위로 독립적으로 split_top_level ~ materialize까지
+    # 끝내고, cross-ref 해결과 peer_tables만 전체 문서를 모은 뒤 한 번에 계산한다.
     # ============================================================
     def parse_to_hierarchical_nodes(self, llama_docs):
-        all_nodes = []
-        node_dict = {}
+        all_nodes, node_dict = [], {}
+        article_index = defaultdict(list)
+        article_paragraph_index = {}
+        byeolpyo_index = defaultdict(list)
+        parent_nodes = []
 
-        # 페이지 경계에서 조문이 끊기지 않도록 전체 문서를 하나의 텍스트로 합친다.
-        full_text = "\n".join([doc.text for doc in llama_docs])
+        for doc in llama_docs:
+            file_name, law_title = self._extract_law_title([doc])
+            normalized = _normalize_text(doc.text)
+            regions = split_top_level(normalized)
 
-        law_title = "답변자료"
-        if llama_docs:
-            first_meta = getattr(llama_docs[0], "metadata", {})
-            if isinstance(first_meta, dict):
-                fname = first_meta.get("file_name")
-                if fname:
-                    law_title = os.path.splitext(fname)[0]
+            tasks = [(name, text) for name, text in regions.items() if text.strip()]
+            if not tasks:
+                continue
 
-        sections = self._split_into_sections(full_text)
-        all_table_nos = [s["meta"]["table_no"] for s in sections if s["type"] == "별표"]
+            total_chars = sum(len(t) for _, t in tasks)
+            use_mp = (
+                total_chars >= self.cfg["parallel_char_threshold"]
+                and len(tasks) > 1
+                and os.environ.get("LAWCHUNKER_DISABLE_MP") != "1"
+            )
 
-        for section in sections:
-            if section["type"] == "intro":
-                # 서두 문구도 크기 상한을 넘으면 여러 parent로 나눠 통제한다.
-                for piece in self._cap_text(section["body"], _MAX_PARENT_CHARS):
-                    p_node = TextNode(
-                        text=piece,
-                        metadata={"law_title": law_title, "doc_type": "intro", "type": "parent"},
-                    )
-                    all_nodes.append(p_node)
-                    node_dict[p_node.node_id] = p_node
+            try:
+                if use_mp:
+                    with concurrent.futures.ProcessPoolExecutor(max_workers=min(3, len(tasks))) as ex:
+                        futures = [ex.submit(_process_region_worker, name, text, law_title, self.cfg) for name, text in tasks]
+                        results = [f.result() for f in futures]
+                else:
+                    results = [_process_region_worker(name, text, law_title, self.cfg) for name, text in tasks]
+            except Exception as e:
+                self.logger.warning(f"[LawChunker] ({file_name or law_title}) 병렬 처리 실패, 순차 처리로 재시도합니다: {e}")
+                results = [_process_region_worker(name, text, law_title, self.cfg) for name, text in tasks]
 
-            elif section["type"] == "조문":
-                for parent_node, child_nodes in self._parse_article_section(section, law_title):
-                    node_dict[parent_node.node_id] = parent_node
-                    all_nodes.append(parent_node)
-                    all_nodes.extend(child_nodes)
+            for r in results:
+                for w in r.get("warnings", []):
+                    self.logger.warning(f"[LawChunker] {w}")
 
-            elif section["type"] == "별표":
-                for parent_node, child_nodes in self._parse_byeolpyo_section(section, law_title):
-                    # 다른 별표들과 서로 참조할 수 있도록 형제 별표 목록을 메타데이터로 남긴다.
-                    parent_node.metadata["peer_tables"] = [
-                        t for t in all_table_nos if t != parent_node.metadata["table_no"]
-                    ]
-                    node_dict[parent_node.node_id] = parent_node
-                    all_nodes.append(parent_node)
-                    all_nodes.extend(child_nodes)
+            results_by_region = {r["region"]: r for r in results}
+            doc_nodes = []
 
-            elif section["type"] == "부칙":
-                text = f"{section['header']}\n{section['body']}"
-                node = TextNode(
-                    text=text,
-                    metadata={
-                        "law_title": law_title,
-                        "doc_type": "부칙",
-                        "type": "parent",
-                        "is_latest": section["meta"].get("is_latest", False),
-                    },
-                )
-                node_dict[node.node_id] = node
-                all_nodes.append(node)
+            # --- 조문 (intro 포함) ---
+            jomun_result = results_by_region.get("jomun")
+            if jomun_result:
+                ratio, ok = jomun_result.get("ratio", 1.0), jomun_result.get("ok", True)
+                intro_text = (jomun_result.get("intro_text") or "").strip()
+                if intro_text:
+                    pieces = [intro_text] if count_tokens(intro_text) <= self.cfg["max_parent_tokens"] \
+                        else tiktoken_window_split(intro_text, self.cfg["max_parent_tokens"], self.cfg["child_overlap_tokens"])
+                    for piece in pieces:
+                        p_node = TextNode(text=piece, metadata={
+                            "law_title": law_title, "doc_type": "intro", "type": "parent",
+                            "reconstruction_ratio": ratio, "reconstruction_ok": ok,
+                        })
+                        doc_nodes.append(p_node)
+                        node_dict[p_node.node_id] = p_node
+
+                for article_payload in jomun_result.get("articles", []):
+                    for g in article_payload["groups"]:
+                        parent_tn, child_nodes = materialize_parent_group(g, law_title, "조문", self.cfg)
+                        parent_tn.metadata["reconstruction_ratio"] = ratio
+                        parent_tn.metadata["reconstruction_ok"] = ok
+                        for c in child_nodes:
+                            c.metadata["reconstruction_ratio"] = ratio
+                            c.metadata["reconstruction_ok"] = ok
+                        node_dict[parent_tn.node_id] = parent_tn
+                        doc_nodes.append(parent_tn)
+                        doc_nodes.extend(child_nodes)
+                        parent_nodes.append(parent_tn)
+
+                        article_no = parent_tn.metadata.get("article_no")
+                        if article_no:
+                            article_index[article_no].append(parent_tn.node_id)
+                            clause_marker = parent_tn.metadata.get("clause_marker")
+                            if clause_marker:
+                                article_paragraph_index[(article_no, clause_marker)] = parent_tn.node_id
+
+            # --- 별표 ---
+            byeolpyo_result = results_by_region.get("byeolpyo")
+            if byeolpyo_result:
+                ratio, ok = byeolpyo_result.get("ratio", 1.0), byeolpyo_result.get("ok", True)
+                for table_payload in byeolpyo_result.get("tables", []):
+                    for g in table_payload["groups"]:
+                        parent_tn, child_nodes = materialize_parent_group(g, law_title, "별표", self.cfg)
+                        parent_tn.metadata["reconstruction_ratio"] = ratio
+                        parent_tn.metadata["reconstruction_ok"] = ok
+                        for c in child_nodes:
+                            c.metadata["reconstruction_ratio"] = ratio
+                            c.metadata["reconstruction_ok"] = ok
+                        node_dict[parent_tn.node_id] = parent_tn
+                        doc_nodes.append(parent_tn)
+                        doc_nodes.extend(child_nodes)
+                        parent_nodes.append(parent_tn)
+
+                        table_no = parent_tn.metadata.get("table_no")
+                        if table_no:
+                            byeolpyo_index[table_no].append(parent_tn.node_id)
+
+            # --- 부칙 ---
+            buchil_result = results_by_region.get("buchil")
+            if buchil_result:
+                ratio, ok = buchil_result.get("ratio", 1.0), buchil_result.get("ok", True)
+                for entry in buchil_result.get("entries", []):
+                    node = TextNode(text=entry["text"], metadata={
+                        "law_title": law_title, "doc_type": "부칙", "type": "parent",
+                        "law_no": entry["law_no"],
+                        "published_date": entry["published_date"],
+                        "effective_date": entry["effective_date"],
+                        "effective_date_exceptions": entry["effective_date_exceptions"],
+                        "is_latest": entry["is_latest"],
+                        "reconstruction_ratio": ratio, "reconstruction_ok": ok,
+                    })
+                    node_dict[node.node_id] = node
+                    doc_nodes.append(node)
+
+            # --- 파일별 top_k 검색을 위한 소스 파일명 태깅 (doc마다 자기 파일명으로) ---
+            if file_name:
+                for n in doc_nodes:
+                    n.metadata["file_name"] = file_name
+
+            all_nodes.extend(doc_nodes)
+
+        # --- peer_tables: 전체 문서를 모은 별표 인덱스 기준으로 한 번에 계산 ---
+        all_table_nos = list(byeolpyo_index.keys())
+        for table_no in all_table_nos:
+            peers = [nid for other in all_table_nos if other != table_no for nid in byeolpyo_index[other]]
+            for nid in byeolpyo_index[table_no]:
+                node_dict[nid].metadata["peer_tables"] = peers
+
+        # --- cross-ref 2-pass 해결 (전체 문서를 모은 인덱스 기준) ---
+        resolve_cross_refs(parent_nodes, article_index, article_paragraph_index, byeolpyo_index)
 
         self.logger.info(f"[LawChunker] 계층 노드 생성 완료 - 총 {len(all_nodes)}개 (parent+child)")
         return all_nodes, node_dict
-
