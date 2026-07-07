@@ -272,10 +272,10 @@ if __name__ == "__main__":
     #agent_infos.append({"mode":"PpsProductsAgent", "name":"조달청 물품 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsProductsAgentGuide.zip;./llm-mcp-doc-rag/resource/agent/PpsProductsAgent.zip;"})
     #agent_infos.append({"mode":"PpsStockpilingAgent", "name":"조달청 비축 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsStockpilingAgentGuide.zip;./llm-mcp-doc-rag/resource/agent/PpsStockpilingAgent.zip;"})
     
-    #agent_infos.append({"mode":"PpsGeneralServiceAgent", "name":"조달청 일반용역 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsGeneralServiceAgent.zip;"})
-    #agent_infos.append({"mode":"PpsTechnicalServicesAgent", "name":"조달청 기술용역 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsTechnicalServicesAgent.zip;"})
+    agent_infos.append({"mode":"PpsGeneralServiceAgent", "name":"조달청 일반용역 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsGeneralServiceAgent.zip;"})
+    agent_infos.append({"mode":"PpsTechnicalServicesAgent", "name":"조달청 기술용역 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsTechnicalServicesAgent.zip;"})
     agent_infos.append({"mode":"PpsConstructionAgent", "name":"조달청 시설공사 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsConstructionAgent.zip;"})
-    #agent_infos.append({"mode":"PpsProductsAgent", "name":"조달청 물품 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsProductsAgent.zip;"})
+    agent_infos.append({"mode":"PpsProductsAgent", "name":"조달청 물품 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsProductsAgent.zip;"})
     agent_infos.append({"mode":"PpsStockpilingAgent", "name":"조달청 비축 상담", "resource":"./llm-mcp-doc-rag/resource/agent/PpsStockpilingAgent.zip;"})
     
     
