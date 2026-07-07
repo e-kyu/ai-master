@@ -148,32 +148,80 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
     
     llm = config.get_llm().bind(stream=False)
 
-    prompt = ("당신은 조달청 상담의 전문분야를 지정하는 에이전트입니다. 사용자가 입력한 질문과 대화 맥락을 분석하여, 아래 목록에서 가장 적합한 에이전트를 '하나만' 선택하세요.\n"
+    prompt = ("당신은 조달청 상담의 전문분야를 지정하는 에이전트입니다.\n\n"
+                "사용자가 입력한 질문과 대화 맥락을 분석하여, 아래 목록에서 가장 적합한 에이전트를 '하나만' 선택하세요.\n\n"
                 "- PpsGeneralServiceAgent: 조달청 일반용역 전문 상담\n"
                 "- PpsTechnicalServicesAgent: 조달청 기술용역 전문 상담\n"
                 "- PpsConstructionAgent: 조달청 시설공사 전문 상담\n"
                 "- PpsProductsAgent: 조달청 물품 관련 전문 상담\n"
-                "- PpsStockpilingAgent: 조달청 비축 관련 전문 상담\n"
-                "사용자 질문과 대화 맥락을 분석한 후, 가장 적합한 에이전트 이름만 출력하세요. 다른 설명이나 추가 정보는 출력하지 마세요.\n"
-                "사용자 질문: {question}\n"
-                "대화 맥락: {context}\n"
-                "출력형식: 에이전트 이름 (예: PpsGeneralServiceAgent)\n"
+                "- PpsStockpilingAgent: 조달청 비축 관련 전문 상담\n\n"
+                "선택 규칙\n"
+                "1. 사용자 질문과 대화 맥락만을 기반으로 판단합니다.\n"
+                "2. 하나의 에이전트로 명확하게 분류할 수 있는 경우 해당 에이전트 이름만 출력합니다.\n"
+                "3. 질문이 조달청 상담과 무관하거나, 제공된 정보만으로 특정 전문분야를 판단할 수 없거나, 둘 이상의 에이전트가 동일한 수준으로 적합한 경우에는 `None`을 출력합니다.\n"
+                "4. 다른 설명, 이유, 부가 문구, 마크다운은 절대 출력하지 않습니다.\n\n"
+                "사용자 질문: {contextual_query}\n"
+                "대화 맥락: {context}\n\n"
+                "출력 형식\n"
+                "- PpsGeneralServiceAgent\n"
+                "- PpsTechnicalServicesAgent\n"
+                "- PpsConstructionAgent\n"
+                "- PpsProductsAgent\n"
+                "- PpsStockpilingAgent\n"
+                "- None\n"
                 )
     try:
         logger.debug(f"Determining agent_mode for convrstn_id={state.get('convrstn_id')}")
-        llm_response = llm.invoke(prompt.format(question=state["question"], context=state["convrstn_context"]))
+        llm_response = llm.invoke(prompt.format(contextual_query=state["contextual_query"], context=state["convrstn_context"]))
     except Exception as e:
         logger.error(f"agent_mode determination failed for convrstn_id={state.get('convrstn_id')}: {e}")
         llm_response = None
 
-    # 안전하게 llm_response.content 접근 (기본값으로 PpsStockpilingAgent 사용)
-    agent_mode = None
-    if llm_response is None:
-        agent_mode = "PpsStockpilingAgent"
-    else:
-        agent_mode = getattr(llm_response, "content", None)
-        if not agent_mode or not isinstance(agent_mode, str):
-            agent_mode = "PpsStockpilingAgent"
+
+    agent_mode = getattr(llm_response, "content", None) if llm_response else None
+    if not agent_mode or not isinstance(agent_mode, str) or agent_mode == "None":
+        error_message = (
+            "문의 내용을 하나의 전문분야로 판단하기 어렵습니다.\n"
+            "아래 항목 중 가장 가까운 분야를 하나만 선택해 주세요.\n"
+            "조달청 일반용역 상담\n"
+            "조달청 기술용역 상담\n"
+            "조달청 시설공사 상담\n"
+            "조달청 물품 관련 상담\n"
+            "조달청 비축 관련 상담\n"
+            "선택하신 분야를 기준으로 상담을 이어가겠습니다."
+        )
+        logger.error(f"[Law Base Search Agent] agent_mode missing convrstn_id={state.get('convrstn_id')}")
+        return {
+            "status": "failed",
+            "error_message": error_message,
+        }
+
+    # agent_mode 값이 없거나 유효하지 않은 경우, 에러 메시지를 리턴합니다.
+    allowed_agent_modes = [
+        "PpsGeneralServiceAgent",
+        "PpsTechnicalServicesAgent",
+        "PpsConstructionAgent",
+        "PpsProductsAgent",
+        "PpsStockpilingAgent",
+    ]
+
+    agent_mode = agent_mode.strip()
+    if agent_mode not in allowed_agent_modes:
+        error_message = (
+            "문의 내용을 하나의 전문분야로 판단하기 어렵습니다.\n"
+            "아래 항목 중 분야를 선택해 주세요.\n"
+            "조달청 일반용역 상담\n"
+            "조달청 기술용역 상담\n"
+            "조달청 시설공사 상담\n"
+            "조달청 물품 관련 상담\n"
+            "조달청 비축 관련 상담\n"
+            "선택하신 분야를 기준으로 상담을 이어가겠습니다."
+        )
+        logger.error(f"[Law Base Search Agent] invalid agent_mode convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}")
+        return {
+            "status": "failed",
+            "error_message": error_message,
+        }
 
     logger.info(f"[Law Base Search Agent] agent_mode 결정 convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}")
 
@@ -181,6 +229,8 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
         "tool": "qna_law_base",
         "input": {"question":state["contextual_query"], "agent_mode": agent_mode},
     }
+
+
 
     try:
         logger.debug(f"Calling tool qna_law_base with agent_mode={agent_mode} convrstn_id={state.get('convrstn_id')}")
@@ -318,10 +368,16 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
         f"- **Enhanced Query:** {agent_state['contextual_query']}\n\n"
     )
     
-    agent_state['rag_answer'].append(SystemMessage(content=final_prompt))
-    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_doc_answer', '')))
-    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_law_base_answer', '')))
-    agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_web_search_answer', '')))
+
+    if agent_state.get('status') == "failed":
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('error_message', '')))
+    else:
+        agent_state['rag_answer'].append(SystemMessage(content=final_prompt))
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('status', '')))
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('error_message', '')))
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_doc_answer', '')))
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_law_base_answer', '')))
+        agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_web_search_answer', '')))
 
     logger.info(f"Prepared final RAG messages for convrstn_id={convrstn_id}")
 
