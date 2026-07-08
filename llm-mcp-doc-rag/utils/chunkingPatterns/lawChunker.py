@@ -1205,6 +1205,7 @@ def route_after_detect(state: GraphState) -> str:
 # "일반 텍스트용 폴백 청커(FallbackChunker)"에게 처리를 넘긴다.
 # ============================================================
 def node_fallback_chunk(state: GraphState) -> dict:
+    logger.info("[LawChunker] fallback_chunk 시작")
     try:
         from utils.chunkingPatterns.fallbackChunker import FallbackChunker  # 프로젝트 내 기존 폴백 구현체 (이 파일에는 포함되어 있지 않음)
     except ImportError:
@@ -1229,6 +1230,7 @@ def node_fallback_chunk(state: GraphState) -> dict:
 # 그 노드 뒤에 "fan_out_documents"라는 두 번째 조건부 엣지를 붙인다.
 # ============================================================
 def node_prepare_documents(state: GraphState) -> dict:
+    logger.info("[LawChunker] prepare_documents (팬아웃 준비) 실행")
     return {}  # 상태를 바꾸지 않는 빈 노드. 오직 "다음에 Send 팬아웃을 붙이기 위한 자리"로만 존재.
 
 
@@ -1243,6 +1245,7 @@ def fan_out_documents(state: GraphState):
         즉 process_document 노드가 3번, 서로 독립적인 입력을 가지고 실행된다.
     """
     cfg = state["cfg"]
+    logger.info(f"[LawChunker] fan_out_documents: 문서 수={len(state.get('llama_docs', []))} 만큼 process_document로 분기")
     return [Send("process_document", {"doc": doc, "cfg": cfg}) for doc in state["llama_docs"]]
 
 
@@ -1256,6 +1259,7 @@ def fan_out_documents(state: GraphState):
 def node_process_document(task: DocTask) -> dict:
     doc, cfg = task["doc"], task["cfg"]
     file_name, law_title = _extract_law_title([doc])
+    logger.info(f"[LawChunker] process_document 시작: file={file_name or '<unknown>'}, title={law_title}")
     normalized = _normalize_text(doc.text)          # 마크다운 장식 제거
     regions = split_top_level(normalized)            # 부칙→별표→조문 순으로 boundary-first 3영역 분리
 
@@ -1317,6 +1321,7 @@ def node_process_document(task: DocTask) -> dict:
 # 전체 문서를 합친 인덱스가 필요하기 때문에 이 병합 단계가 꼭 필요하다.
 # ============================================================
 def node_merge_documents(state: GraphState) -> dict:
+    logger.info("[LawChunker] merge_documents 시작 - 문서별 결과 병합")
     all_nodes, node_dict = [], {}
     article_index = defaultdict(list)
     article_paragraph_index = {}
@@ -1356,6 +1361,7 @@ def node_merge_documents(state: GraphState) -> dict:
 # 보여줄 수 있다"는 힌트로 활용할 수 있다.
 # ============================================================
 def node_compute_peer_tables(state: GraphState) -> dict:
+    logger.info("[LawChunker] compute_peer_tables 시작 - 별표 피어 계산")
     byeolpyo_index = state["byeolpyo_index"]   # {"별표1": [node_id, ...], "별표2": [...], ...}
     node_dict = state["node_dict"]
     all_table_nos = list(byeolpyo_index.keys())   # ["별표1", "별표2", "별표3", ...]
@@ -1379,6 +1385,7 @@ def node_compute_peer_tables(state: GraphState) -> dict:
 # (그래도 LangGraph 노드 규약을 지키기 위해 빈 딕셔너리를 반환한다).
 # ============================================================
 def node_resolve_cross_refs(state: GraphState) -> dict:
+    logger.info("[LawChunker] resolve_cross_refs 시작 - 교차참조 2-pass 해결")
     resolve_cross_refs(
         state["parent_nodes"],
         state["article_index"],
@@ -1396,6 +1403,7 @@ def node_resolve_cross_refs(state: GraphState) -> dict:
 # (LawChunker.parse_to_hierarchical_nodes()가 바로 이 두 값을 꺼내서 반환한다.)
 # ============================================================
 def node_finalize(state: GraphState) -> dict:
+    logger.info("[LawChunker] finalize 시작 - 최종화 및 경고 로깅")
     for w in state.get("warnings", []):
         logger.warning(f"[LawChunker] {w}")
     logger.info(f"[LawChunker] 계층 노드 생성 완료 - 총 {len(state['all_nodes'])}개 (parent+child)")
