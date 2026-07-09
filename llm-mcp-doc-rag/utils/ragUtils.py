@@ -24,6 +24,7 @@ from llama_index.core.retrievers import RecursiveRetriever, BaseRetriever
 from llama_index.core.schema import IndexNode, BaseNode
 from llama_index.core.postprocessor import SimilarityPostprocessor, LLMRerank
 from llama_index.core import Settings as LlamaSettings
+from llama_index.core.response_synthesizers import ResponseMode
 
 # ==============================================================================
 # [설정 상수 정의]
@@ -257,8 +258,9 @@ def _build_query_engine(file_retrievers: List[BaseRetriever], combined_node_dict
     ]
 
     return RetrieverQueryEngine.from_args(
-        recursive_retriever,
+        retriever=recursive_retriever,
         node_postprocessors=node_postprocessors,
+        response_mode=ResponseMode.CONTEXT_ONLY,
         streaming=False,
         timeout=timeout
     )
@@ -438,9 +440,11 @@ def make_rag_query_engine_from_docs(docs: List[Any], is_save: bool = False) -> O
         ]
 
         logger.info("단계 3: 메모리 기반 외부 지식 소스 결합형 쿼리 엔진 구축 완료")
+
         return RetrieverQueryEngine.from_args(
-            recursive_retriever,
+            retriever=recursive_retriever,
             node_postprocessors=node_postprocessors,
+            response_mode=ResponseMode.CONTEXT_ONLY,
             streaming=False,
             timeout=600
         )
