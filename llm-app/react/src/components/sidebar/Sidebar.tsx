@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useAppState } from "../../context/appStateStore"
+import { useConversationHistory } from "../../hooks/useConversationHistory"
 import { CloseIcon, PlusIcon } from "../common/Icons"
 import { ConversationList } from "./ConversationList"
 
@@ -8,12 +9,32 @@ const MIN_WIDTH = 240
 const MAX_WIDTH = 480
 const DEFAULT_WIDTH = 350
 
+const HISTORY_GROUPS = [
+  { mode: "NoticeScanAgent", label: "공고서 항목 자동 추출 Agent" },
+  { mode: "PpsAssistAgent", label: "공공조달 전문 상담 Agent" },
+] as const
+
 export function Sidebar() {
   const navigate = useNavigate()
-  const { sidebarOpen, setSidebarOpen } = useAppState()
+  const { sidebarOpen, setSidebarOpen, historyVersion } = useAppState()
   const [width, setWidth] = useState(DEFAULT_WIDTH)
   const [isResizing, setIsResizing] = useState(false)
   const draggingRef = useRef(false)
+  const { items, loading, error, remove } = useConversationHistory(historyVersion)
+  const [activeTab, setActiveTab] = useState<string>(HISTORY_GROUPS[0].mode)
+
+  const tabs = useMemo(() => {
+    const known = new Set<string>(HISTORY_GROUPS.map((g) => g.mode))
+    const others = items.filter((item) => !item.mode || !known.has(item.mode))
+    const groups = HISTORY_GROUPS.map((group) => ({
+      id: group.mode,
+      label: group.label,
+      items: items.filter((item) => item.mode === group.mode),
+    }))
+    return others.length > 0 ? [...groups, { id: "others", label: "기타", items: others }] : groups
+  }, [items])
+
+  const activeGroup = tabs.find((tab) => tab.id === activeTab) ?? tabs[0]
 
   useEffect(() => {
     if (!isResizing) return
@@ -85,9 +106,33 @@ export function Sidebar() {
             </button>
           </div>
 
+          <div className="mt-3 flex gap-1 p-1 bg-zinc-100 rounded-lg overflow-x-auto no-scrollbar">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex-1 min-w-0 rounded-md px-2 py-1.5 text-center text-xs font-medium transition-all duration-200 ${
+                  activeTab === tab.id
+                    ? "bg-white text-brand-600 shadow-sm"
+                    : "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           <div className="mt-2 flex-1 overflow-y-auto px-2 pb-4">
-            <p className="px-3 py-2 text-[11px] font-semibold tracking-wide text-zinc-400">대화 이력</p>
-            <ConversationList />
+            <ConversationList
+              items={activeGroup?.items ?? []}
+              loading={loading}
+              error={error}
+              emptyDescription={
+                activeGroup && activeGroup.id !== "others" ? `${activeGroup.label}와의 대화를 시작해보세요.` : undefined
+              }
+              onDelete={remove}
+            />
           </div>
 
           <div
