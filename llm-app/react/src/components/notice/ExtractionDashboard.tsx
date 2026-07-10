@@ -38,7 +38,7 @@ interface FlatField {
   status: "ok" | "review"
 }
 
-function flattenFields(result: NoticeScanResult): FlatField[] {
+export function flattenFields(result: NoticeScanResult): FlatField[] {
   const general = (result.extracted_data?.general ?? {}) as Record<string, unknown>
   const execution = (result.extracted_data?.execution ?? {}) as Record<string, unknown>
   return FIELD_DEFS.map(({ key, label, section }) => {

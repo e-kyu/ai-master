@@ -4,7 +4,7 @@ import { uploadFile } from "../api/upload"
 import { analyzeNoticeStreaming } from "../api/qna"
 import { Spinner } from "../components/common/Spinner"
 import { PipelineStrip, type PipelineStep, type StepStatus } from "../components/notice/PipelineStrip"
-import { DonutSummary, ExtractionDashboard } from "../components/notice/ExtractionDashboard"
+import { DonutSummary, ExtractionDashboard, flattenFields } from "../components/notice/ExtractionDashboard"
 import type { AgentProgressEvent, NoticeScanResult } from "../types"
 import { useIsMobile } from "../hooks/useIsMobile"
 
@@ -298,16 +298,11 @@ export function NoticeScanAgentPage() {
 
   const isDashboard = pageStatus === "done" && result?.extracted_data
 
-  // Count for donut summary
-  const okCount = useMemo(() => {
-    if (!result?.extracted_data) return 0
-    const g = result.extracted_data.general ?? {}
-    const e = result.extracted_data.execution ?? {}
-    const all = { ...g, ...e }
-    return Object.values(all).filter((v) => v !== null && v !== undefined && v !== "").length
-  }, [result])
-  const totalFields = 21
-  const reviewCount = totalFields - okCount
+  // Count for donut summary — must match ExtractionDashboard's own field tally
+  const fields = useMemo(() => (result ? flattenFields(result) : []), [result])
+  const okCount = fields.filter((f) => f.status === "ok").length
+  const reviewCount = fields.filter((f) => f.status === "review").length
+  const totalFields = fields.length
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "#F4F6F9", fontFamily: "Pretendard, system-ui, sans-serif", color: "#161A22", WebkitFontSmoothing: "antialiased" }}>
