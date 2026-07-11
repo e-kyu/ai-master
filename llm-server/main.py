@@ -2,7 +2,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import conversation, conversation_history, agent, upload, ai_tools
+from routers import conversation, conversation_history, agent, upload, ai_tools, notice_scan
 
 # 데이터베이스 초기화를 위한 임포트 추가
 from db.database import Base, engine
@@ -33,6 +33,7 @@ app.include_router(conversation_history.router)
 app.include_router(agent.router)
 app.include_router(upload.router)
 app.include_router(ai_tools.router)
+app.include_router(notice_scan.router)
 
 # 실행은 server 경로에서
 # . venv/bin/activate
