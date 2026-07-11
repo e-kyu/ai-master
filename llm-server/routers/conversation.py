@@ -8,10 +8,10 @@ from pydantic import BaseModel
 
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from utils import config, defaultPrompt, convrstnContextUtils, mcpUtils
+from utils import config, default_prompt, conversation_context_utils, mcp_utils
 
 
-from repository import convrstn_repository, agent_repository
+from repository import conversation_repository, agent_repository
 from agent import pps_assist_agent
 from agent.notice_scan_agent import PureLangNoticeScanAgent
 
@@ -20,7 +20,7 @@ from agent.notice_scan_agent import PureLangNoticeScanAgent
 logger = config.get_logger("./log", "llm-server")
 
 
-# API 경로를 /api/v1로 변경
+# API 경로는 프론트엔드와의 계약 유지를 위해 변경하지 않음
 router = APIRouter(
     prefix="/api/v1/convrstn",
     tags=["qna"],
@@ -38,13 +38,13 @@ class QuestionRequest(BaseModel):
 # 엔드포인트 경로 수정 (/stream -> 유지)
 @router.post("/question")
 async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
-    logger.info(f"[ConvrstnRouter] 질의 요청 수신 agent_mode={request.agent_mode} convrstn_id={request.convrstnId} question={request.question[:50]}")
+    logger.info(f"[ConversationRouter] 질의 요청 수신 agent_mode={request.agent_mode} conversation_id={request.convrstnId} question={request.question[:50]}")
 
     agent_info = agent_repository.read_agent(request.agent_id)
 
     if request.agent_mode == "PpsAssistAgent":
         agent_state = await pps_assist_agent.run(agent_info, request.convrstnId, request.question, request.fileFullPath, request.enableExtDocse)
-        logger.info(f"[ConvrstnRouter] PpsAssistAgent 워크플로우 완료, 최종 답변 스트리밍 시작 convrstn_id={request.convrstnId}")
+        logger.info(f"[ConversationRouter] PpsAssistAgent 워크플로우 완료, 최종 답변 스트리밍 시작 conversation_id={request.convrstnId}")
 
         # tc_llm은 도구 호출용이므로, 일반 답변 생성에는 get_llm()을 사용하는 것이 적절할 수 있음
         # 하지만 일관성을 위해 tc_llm을 유지하되, 스트리밍이 필요한 경우 invoke 대신 stream 사용 고려
@@ -70,13 +70,13 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                         logger.error(f"disconnected error: {e}")
                         
                 # 생성이 완료된 후(또는 에러 발생 후) DB에 저장
-                convrstn_repository.create_convrstn_answer(request.convrstnId, {"convrstn_details_id": agent_state['convrstn_details_id'], "answer": full_response, "agent_id": request.agent_id, "answer_at": datetime.now()})
-                logger.info(f"[ConvrstnRouter] 최종 답변 스트리밍 및 저장 완료 convrstn_id={request.convrstnId} answer_length={len(full_response)}")
+                conversation_repository.create_conversation_answer(request.convrstnId, {"convrstn_details_id": agent_state['conversation_details_id'], "answer": full_response, "agent_id": request.agent_id, "answer_at": datetime.now()})
+                logger.info(f"[ConversationRouter] 최종 답변 스트리밍 및 저장 완료 conversation_id={request.convrstnId} answer_length={len(full_response)}")
 
         return StreamingResponse(event_generator(), media_type="text/plain")
     elif request.agent_mode == "NoticeScanAgent":
         agent = PureLangNoticeScanAgent()
-        logger.info(f"[ConvrstnRouter] NoticeScanAgent 파이프라인 가동(스트리밍) convrstn_id={request.convrstnId} file={request.fileFullPath}")
+        logger.info(f"[ConversationRouter] NoticeScanAgent 파이프라인 가동(스트리밍) conversation_id={request.convrstnId} file={request.fileFullPath}")
 
         async def notice_event_generator():
             final_state = None
@@ -85,7 +85,7 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                 if event.get("type") == "result":
                     final_state = event.get("data")
 
-            logger.info(f"[ConvrstnRouter] NoticeScanAgent 파이프라인 종료 convrstn_id={request.convrstnId} status={(final_state or {}).get('status')}")
+            logger.info(f"[ConversationRouter] NoticeScanAgent 파이프라인 종료 conversation_id={request.convrstnId} status={(final_state or {}).get('status')}")
 
             if final_state:
                 structured = final_state
@@ -97,12 +97,12 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                 elif general.get("refNo"):
                     topic = general["refNo"]
 
-                convrstn_repository.create_convrstn(request.convrstnId, {"topic": topic})
-                question_record = convrstn_repository.create_convrstn_question(
+                conversation_repository.create_conversation(request.convrstnId, {"topic": topic})
+                question_record = conversation_repository.create_conversation_question(
                     request.convrstnId,
                     {"context": "", "question": request.fileFullPath, "enhanced_question": ""},
                 )
-                convrstn_repository.create_convrstn_answer(
+                conversation_repository.create_conversation_answer(
                     request.convrstnId,
                     {
                         "convrstn_details_id": question_record.convrstn_details_id,

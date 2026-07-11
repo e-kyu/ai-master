@@ -10,10 +10,10 @@ from datetime import datetime
 from components.agent import fetch_agent_list
 from components.sidebar import render_sidebar
 from utils.state_manager import init_session_state, reset_session_state
-from ui import noticeScanAgent, ppsAssistAgent
+from ui import notice_scan_agent, pps_assist_agent
 
 # myUtils
-from utils import fileUtils
+from utils import file_utils
 
 
 
@@ -30,7 +30,7 @@ def render_ui():
 
         render_sidebar()
 
-        ppsAssistAgent.render()
+        pps_assist_agent.render()
             
     elif st.session_state.ui_chat_agent_mode == "NoticeScanAgent":
         # 페이지 설정
@@ -42,7 +42,7 @@ def render_ui():
 
         render_sidebar()
 
-        noticeScanAgent.render()
+        notice_scan_agent.render()
     else:
         # 페이지 설정
         st.set_page_config(page_title="새로운 에이전트 선택"
@@ -98,7 +98,7 @@ def render_ui():
                         st.session_state.ui_chat_agent_desc = agent["description"]
                         
                         st.session_state.messages = []
-                        st.session_state.convrstn_id = str(uuid.uuid4())
+                        st.session_state.conversation_id = str(uuid.uuid4())
                         st.rerun()
 
         st.info("원하는 에이전트의 '시작하기' 버튼을 클릭하면 대화 화면으로 이동합니다.")
@@ -113,15 +113,15 @@ if __name__ == "__main__":
         st.session_state.ui_chat_agent_mode = ""
 
     # 개별 파라미터 읽기
-    agentMode = st.query_params.get("agentMode", st.session_state.ui_chat_agent_mode)
+    agent_mode = st.query_params.get("agentMode", st.session_state.ui_chat_agent_mode)
 
-    if agentMode != "":
+    if agent_mode != "":
 
-        # Agent 그리드 구성을 위한 데이터 조회        
+        # Agent 그리드 구성을 위한 데이터 조회
         agents = fetch_agent_list();
-        
+
         if agents is not None and len(agents) > 0:
-            selected_agent = next((agent for agent in agents if agent["mode"] == agentMode), None)
+            selected_agent = next((agent for agent in agents if agent["mode"] == agent_mode), None)
             if selected_agent is not None:
                 st.session_state.ui_chat_agent_id = selected_agent["agent_id"]
                 st.session_state.ui_chat_mode = selected_agent["description"]

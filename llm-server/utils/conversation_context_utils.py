@@ -1,26 +1,26 @@
 import json
 import re
 from utils import config
-from repository import convrstn_repository
+from repository import conversation_repository
 from datetime import datetime
 
 logger = config.get_logger("./log", "llm-server")
 
-def get_convrstn_context(convrstn_id: str, question: str) -> str:
+def get_conversation_context(conversation_id: str, question: str) -> str:
     """
     기존 대화 맥락을 조회하거나, 없는 경우 최근 대화 내역을 바탕으로 LLM을 통해 맥락을 요약하여 반환합니다.
     """
-    logger.info(f"[ConvrstnContext] 맥락 조회 시작 convrstn_id={convrstn_id} question={question[:50]}")
+    logger.info(f"[ConversationContext] 맥락 조회 시작 conversation_id={conversation_id} question={question[:50]}")
 
     # 1. 최근 대화 내역 조회 (최대 6개)
-    convrstn_details = convrstn_repository.read_recent_convrstn(convrstn_id, limit=6)
-    logger.debug(f"[ConvrstnContext] 최근 대화 내역 {len(convrstn_details)}건 조회 convrstn_id={convrstn_id}")
+    conversation_details = conversation_repository.read_recent_conversation(conversation_id, limit=6)
+    logger.debug(f"[ConversationContext] 최근 대화 내역 {len(conversation_details)}건 조회 conversation_id={conversation_id}")
 
     # 2. 대화 이력이 6회 이상인 경우에만 기존 저장된 맥락 조회
     existing_context = ""
-    if len(convrstn_details) > 1:
-        existing_context = convrstn_repository.read_context_convrstn(convrstn_id)
-        logger.debug(f"[ConvrstnContext] 기존 맥락 {'존재' if existing_context else '없음'} convrstn_id={convrstn_id}")
+    if len(conversation_details) > 1:
+        existing_context = conversation_repository.read_context_conversation(conversation_id)
+        logger.debug(f"[ConversationContext] 기존 맥락 {'존재' if existing_context else '없음'} conversation_id={conversation_id}")
 
     # 3. LLM 프롬프트 구성을 위한 대화 이력 포맷팅
     history_str = ""
@@ -29,10 +29,10 @@ def get_convrstn_context(convrstn_id: str, question: str) -> str:
                 f"{existing_context}"
                 "\n\n"
                 "- **History of last conversation:**\n"
-                f"{[f"Q: {r.question}\nA: {r.answer}" for r in [convrstn_details[-1]]]}"
+                f"{[f"Q: {r.question}\nA: {r.answer}" for r in [conversation_details[-1]]]}"
             )
     else:
-        history_str = "\n".join([f"Q: {r.question}\nA: {r.answer}" for r in convrstn_details])
+        history_str = "\n".join([f"Q: {r.question}\nA: {r.answer}" for r in conversation_details])
 
     prompt = ("""
                 # Role
@@ -82,29 +82,29 @@ def get_convrstn_context(convrstn_id: str, question: str) -> str:
 
         # 5. 생성된 맥락이 있다면 DB 업데이트
         if context_data:
-            convrstn_repository.update_convrstn_context(convrstn_id, context_data)
-            logger.info(f"[ConvrstnContext] 맥락 갱신 완료 convrstn_id={convrstn_id} topic={context_data.get('topic')}")
+            conversation_repository.update_conversation_context(conversation_id, context_data)
+            logger.info(f"[ConversationContext] 맥락 갱신 완료 conversation_id={conversation_id} topic={context_data.get('topic')}")
         else:
-            logger.info(f"[ConvrstnContext] 주제 전환으로 판단되어 맥락을 비웁니다 convrstn_id={convrstn_id}")
+            logger.info(f"[ConversationContext] 주제 전환으로 판단되어 맥락을 비웁니다 conversation_id={conversation_id}")
 
         return context_data
     except Exception as e:
-        logger.error(f"[ConvrstnContext] 맥락 생성 중 오류 발생 convrstn_id={convrstn_id}: {e}")
+        logger.error(f"[ConversationContext] 맥락 생성 중 오류 발생 conversation_id={conversation_id}: {e}")
         return ""
 
-def enhance_query_with_context(convrstn_context: str, question: str) -> str:
+def enhance_query_with_context(conversation_context: str, question: str) -> str:
     """
     이전 대화 맥락을 바탕으로 사용자의 질문을 구체화된 질의문으로 재작성합니다.
 
     Args:
-        convrstn_context (str): 요약된 이전 대화 맥락
+        conversation_context (str): 요약된 이전 대화 맥락
         question (str): 사용자의 현재 질문
 
     Returns:
         str: 대명사 복원 및 의도가 보완된 강화된 질의문
     """
-    
-    logger.info(f"[ConvrstnContext] 질의 강화 시작 question={question[:50]}")
+
+    logger.info(f"[ConversationContext] 질의 강화 시작 question={question[:50]}")
     today_str = datetime.now().strftime("%Y년 %m월 %d일")
 
     contextual_query_enhancer_prompt = (
@@ -132,7 +132,7 @@ def enhance_query_with_context(convrstn_context: str, question: str) -> str:
         "- 사용자: \"내일 날씨 어때?\"\n"
         f"- 출력: ({today_str} 기준으로 계산된 내일 날짜) 서울 날씨\n\n"
         "# 입력 데이터\n"
-        f"- [대화 맥락]: {convrstn_context}\n"
+        f"- [대화 맥락]: {conversation_context}\n"
         f"- [현재 사용자 질문]: {question}\n\n"
         "# 최종 재작성된 쿼리:"
     )
@@ -140,6 +140,6 @@ def enhance_query_with_context(convrstn_context: str, question: str) -> str:
     response = config.get_llm().invoke(contextual_query_enhancer_prompt)
     enhanced_query = response.content.strip() if hasattr(response, 'content') else str(response).strip()
 
-    logger.info(f"[ConvrstnContext] 질의 강화 완료 enhanced_query={enhanced_query[:100]}")
+    logger.info(f"[ConversationContext] 질의 강화 완료 enhanced_query={enhanced_query[:100]}")
 
     return enhanced_query

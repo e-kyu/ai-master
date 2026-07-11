@@ -1,6 +1,6 @@
 import mcp.types as types
 
-from utils import config, ragUtils, loggerUtil
+from utils import config, rag_utils, logger_util
 from retrieval import search_service
 import re
 import time
@@ -9,7 +9,7 @@ from typing import List, TypedDict
 from langgraph.graph import StateGraph, END
 
 # 로거 인스턴스 생성
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
 # LangGraph 상태 정의
 class GraphState(TypedDict):
@@ -58,7 +58,7 @@ async def execute_rag(state: GraphState):
     logger.info("---EXECUTING RAG---")
     contexts = []
     if state['documents']:
-        query_engine = ragUtils.makeRagRetrieverFromDocs(state['documents'], False)
+        query_engine = rag_utils.make_rag_query_engine_from_docs(state['documents'], False)
         # 각 하위 질문에 대해 검색 결과 도출
         for sub_q in state['sub_questions']:
             response = query_engine.query(sub_q)

@@ -6,7 +6,7 @@ from datetime import datetime
 
 
 # myUtils
-from utils import fileUtils
+from utils import file_utils
 
 ####################################################################################
 ### MCP를 호출하는 CONVERSATION 서버의 API를 호출하고 응답을 화면에 출력한다.                    ###
@@ -31,8 +31,8 @@ def render():
 
             # 업로드된 파일을 저장하고 파일 경로를 세션 상태에 저장합니다.
             today_str = datetime.now().strftime("%Y%m%d")
-            st.session_state.fileFullPath = fileUtils.save_uploaded_file(f"./uploadFile/{today_str}/", prompt.files[0])
-            
+            st.session_state.file_full_path = file_utils.save_uploaded_file(f"./uploadFile/{today_str}/", prompt.files[0])
+
             st.session_state.update({"question": prompt.text})
         else:
             if "text" in prompt:
@@ -43,10 +43,10 @@ def render():
     # --- 세션 상태 초기화 ---
     if "messages" not in st.session_state:
         st.session_state.messages = []
-        st.session_state.convrstn_id = str(uuid.uuid4())
-        
-    if "convrstn_id" not in st.session_state:
-        st.session_state.convrstn_id = str(uuid.uuid4())
+        st.session_state.conversation_id = str(uuid.uuid4())
+
+    if "conversation_id" not in st.session_state:
+        st.session_state.conversation_id = str(uuid.uuid4())
 
     # --- 세션 상태 초기화 ---
     if len(st.session_state.messages) > 0 and "question" not in st.session_state.messages[0]:
@@ -73,8 +73,8 @@ def render():
         data = {
             "agent_id": st.session_state.get("ui_chat_agent_id", ""),
             "agent_mode": st.session_state.get("ui_chat_agent_mode", ""),
-            "convrstnId": st.session_state.get("convrstn_id", ""),
-            "fileFullPath": st.session_state.get("fileFullPath", ""),
+            "convrstnId": st.session_state.get("conversation_id", ""),
+            "fileFullPath": st.session_state.get("file_full_path", ""),
             "question": conversation['question'],
             "enableExtDocse": st.session_state.get("ui_enable_ext_docse", False),
         }
@@ -117,7 +117,7 @@ def render():
                 col1.write(f"📎 {f.name}")
 
                 if col2.button("❌", key=f"del_{i}", type="tertiary"):
-                    st.session_state.fileFullPath = None
+                    st.session_state.file_full_path = None
                     st.session_state.uploaded_files.pop(i)
 
         except requests.RequestException as e:

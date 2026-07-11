@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from utils import ragUtils
+from utils import rag_utils
 
 
 from llama_index.llms.langchain import LangChainLLM
@@ -41,27 +41,27 @@ class Settings(BaseSettings):
     # 환경변수에서 설정한 LLM model의 인스턴스를 반환합니다. (싱글턴)
     def get_llm(self):
         if self._llm is None:
-            apiBaseUrl = self.API_BASE_URL
-            llmModel   = self.LLM_MODEL
-            print("model ========>>>>>>LLM_MODEL = " + llmModel)
-            
-            if llmModel == "AzureChatOpenAI" :
+            api_base_url = self.API_BASE_URL
+            llm_model = self.LLM_MODEL
+            print("model ========>>>>>>LLM_MODEL = " + llm_model)
+
+            if llm_model == "AzureChatOpenAI":
                 from langchain_openai import AzureChatOpenAI
-                self._llm = LangChainLLM(llm=AzureChatOpenAI(   api_key=self.AOAI_API_KEY,
+                self._llm = LangChainLLM(llm=AzureChatOpenAI(api_key=self.AOAI_API_KEY,
                                                                 azure_endpoint=self.AOAI_ENDPOINT,
                                                                 azure_deployment=self.AOAI_DEPLOY_GPT_MINI,
                                                                 api_version=self.AOAI_API_VERSION,
                                                                 temperature=0.7,
                                                             )
                                         )
-            else :
+            else:
                 # llamaindex의 Ollama를 사용하면 Langchain에서 실행한 llm을 종료하고 새로실행하는 문제가 발생하여 ChatOllama의 인스턴스를 직접 생성하여 LangChainLLM의 래퍼로 감싸는 방식으로 변경
                 from langchain_ollama import ChatOllama
-                self._llm = LangChainLLM(llm=ChatOllama(base_url=apiBaseUrl
-                                                        , model=llmModel
-                                                        , reasoning=False, # 강화된 질의문 생성 시 내부 추론 과정 생략 (최종 답변에 바로 집중)
-                                                        )
-                                        )
+                self._llm = LangChainLLM(llm=ChatOllama(
+                    base_url=api_base_url,
+                    model=llm_model,
+                    reasoning=False, # 강화된 질의문 생성 시 내부 추론 과정 생략 (최종 답변에 바로 집중)
+                ))
         return self._llm
     
     # 환경변수에서 설정한 Embedding model의 인스턴스를 반환합니다.
@@ -113,7 +113,7 @@ class Settings(BaseSettings):
                 if not resource_path.strip():
                     continue
                 
-                self._query_engines[key].append(ragUtils.make_rag_query_engine(resource_path, is_save=True, is_base_resource=True))
+                self._query_engines[key].append(rag_utils.make_rag_query_engine(resource_path, is_save=True, is_base_resource=True))
 
         return self._query_engines[key]
 

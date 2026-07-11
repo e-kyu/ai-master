@@ -11,7 +11,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.responses import Response
 
-from utils import config, loggerUtil
+from utils import config, logger_util
 
 # =========================
 # LangChain Tool
@@ -20,9 +20,9 @@ from langchain_core.tools import tool
 from llama_index.core import Settings
 from llama_index.core.node_parser import SentenceSplitter
 
-from tools import listTools, docAnalyze, ragWebsite, convertToMarkdown
+from tools import list_tools, doc_analyze, rag_website, convert_to_markdown as convert_to_markdown_tool
 
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 app = Server("mcp-server")
 sse = SseServerTransport("/messages")
 
@@ -69,7 +69,7 @@ async def qna_web_search(**kwargs):
             text="인터넷 검색이 허용되지 않아 정보를 찾을 수 없습니다. '외부문서 검색 허용'을 활성화해주세요."
         )]
     
-    return await ragWebsite.execute(args.question)
+    return await rag_website.execute(args.question)
 
 
 
@@ -102,7 +102,7 @@ async def qna_doc(**kwargs):
 
     args = QnADocInput(**kwargs)
 
-    return await docAnalyze.execute(args.question, args.fileFullPath, None, args.allow_search)
+    return await doc_analyze.execute(args.question, args.fileFullPath, None, args.allow_search)
 
 
 
@@ -142,7 +142,7 @@ async def qna_law_base(**kwargs):
         logger.error(f"Invalid input for qna_law_base: {e}")
         raise ValueError("Invalid input for qna_law_base. Please check the provided arguments.")
 
-    return await docAnalyze.execute(args.question, args.fileFullPath, args.agent_mode, args.allow_search)
+    return await doc_analyze.execute(args.question, args.fileFullPath, args.agent_mode, args.allow_search)
 
 
 
@@ -168,7 +168,7 @@ async def convert_to_markdown(**kwargs):
         logger.error(f"Invalid input for convert_to_markdown: {e}")
         raise ValueError("Invalid input for convert_to_markdown. Please check the provided arguments.")
 
-    return convertToMarkdown.execute(args.file_path)
+    return convert_to_markdown_tool.execute(args.file_path)
 
 
 # =====================================================
@@ -205,8 +205,8 @@ async def call_tool(
 # 4. MCP list_tools
 # =====================================================
 @app.list_tools()
-async def list_tools() -> list[types.Tool]:
-    return listTools.getList()
+async def handle_list_tools() -> list[types.Tool]:
+    return list_tools.get_list()
 
 
 

@@ -16,17 +16,6 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "Py: LLM-App",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "streamlit",
-            "args": [
-                "run",
-                "./llm-app/streamlit/main.py"
-            ],
-            "justMyCode": true,
-        },
-        {
             "name": "react.js: LLM-App",
             "type": "node-terminal",
             "request": "launch",

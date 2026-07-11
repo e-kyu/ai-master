@@ -50,11 +50,11 @@ class Settings(BaseSettings):
     # 환경변수에서 설정한 LLM model의 인스턴스를 반환합니다. (싱글턴)
     def get_llm(self):
         if self._llm is None:
-            apiBaseUrl = self.API_BASE_URL
-            llmModel   = self.LLM_MODEL
-            logger.info(f"[Config] LLM 인스턴스 생성: LLM_MODEL={llmModel}")
+            api_base_url = self.API_BASE_URL
+            llm_model = self.LLM_MODEL
+            logger.info(f"[Config] LLM 인스턴스 생성: LLM_MODEL={llm_model}")
 
-            if llmModel == "AzureChatOpenAI" :
+            if llm_model == "AzureChatOpenAI":
                 from langchain_openai import AzureChatOpenAI
 
                 self._llm = AzureChatOpenAI(
@@ -64,11 +64,11 @@ class Settings(BaseSettings):
                      api_version=self.AOAI_API_VERSION,
                      temperature=0.7,
                 )
-            else :
+            else:
                 from langchain_ollama import ChatOllama
 
-                self._llm = ChatOllama(base_url=apiBaseUrl
-                                       , model=llmModel
+                self._llm = ChatOllama(base_url=api_base_url
+                                       , model=llm_model
                                        , streaming=True
                                        , reasoning=False, # 강화된 질의문 생성 시 내부 추론 과정 생략 (최종 답변에 바로 집중)
                                       )
@@ -77,11 +77,11 @@ class Settings(BaseSettings):
     # 환경변수에서 설정한 LLM model의 인스턴스를 반환합니다. (싱글턴)
     def get_tc_llm(self):
         if self._tc_llm is None:
-            apiBaseUrl = self.API_BASE_URL
-            tcLlmModel   = self.TC_LLM_MODEL
-            logger.info(f"[Config] Tool-Calling LLM 인스턴스 생성: TC_LLM_MODEL={tcLlmModel}")
-            
-            if tcLlmModel == "AzureChatOpenAI" :
+            api_base_url = self.API_BASE_URL
+            tc_llm_model = self.TC_LLM_MODEL
+            logger.info(f"[Config] Tool-Calling LLM 인스턴스 생성: TC_LLM_MODEL={tc_llm_model}")
+
+            if tc_llm_model == "AzureChatOpenAI":
                 from langchain_openai import AzureChatOpenAI
 
                 self._tc_llm = AzureChatOpenAI(
@@ -92,12 +92,12 @@ class Settings(BaseSettings):
                      temperature=0.7,
                      streaming=True,
                 )
-            else :
+            else:
                 from langchain_ollama import ChatOllama
 
                 self._tc_llm = ChatOllama(
-                    base_url=apiBaseUrl,
-                    model=tcLlmModel,
+                    base_url=api_base_url,
+                    model=tc_llm_model,
                     temperature=0.3,
                     reasoning=False, # 강화된 질의문 생성 시 내부 추론 과정 생략 (최종 답변에 바로 집중)
                 )
@@ -112,7 +112,7 @@ class Settings(BaseSettings):
         
         if self._embedding_model is None:
             model = self.EMBEDDING_MODEL_NM
-            if model == "AzureOpenAIEmbeddings" :
+            if model == "AzureOpenAIEmbeddings":
                 from langchain_openai import AzureOpenAIEmbeddings
 
                 self._embedding_model = AzureOpenAIEmbeddings(
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
                                             azure_endpoint=self.AOAI_ENDPOINT,
                                             )
 
-            else :
+            else:
                 from langchain_huggingface import HuggingFaceEmbeddings
 
                 # Default로 HuggingFaceEmbeddings 인스턴스를 반환합니다.

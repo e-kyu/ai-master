@@ -7,7 +7,7 @@ from datetime import datetime
 
 
 # myUtils
-from utils import fileUtils
+from utils import file_utils
 
 ####################################################################################
 ### MCP를 호출하는 CONVERSATION 서버의 API를 호출하고 응답을 화면에 출력한다.                    ###
@@ -21,17 +21,18 @@ def render():
     if "selected_file_name" not in st.session_state:
         st.session_state.selected_file_name = None
     if "fileFullPath" not in st.session_state:
-        st.session_state.fileFullPath = None
+        st.session_state.file_full_path = None
     if "response_text" not in st.session_state:
         st.session_state.response_text = None
     if "status_message" not in st.session_state:
         st.session_state.status_message = "파일을 선택하면 자동으로 분석을 시작합니다."
 
 
+
     # 초기화 버튼
     if st.button("초기화", type="secondary"):
         st.session_state.selected_file_name = None
-        st.session_state.fileFullPath = None
+        st.session_state.file_full_path = None
         st.session_state.response_text = None
         st.session_state.status_message = "파일을 선택하면 자동으로 분석을 시작합니다."
         st.rerun()
@@ -56,15 +57,15 @@ def render():
             st.session_state.status_message = "파일을 저장하고 분석을 준비 중입니다..."
 
             today_str = datetime.now().strftime("%Y%m%d")
-            st.session_state.fileFullPath = fileUtils.save_uploaded_file(f"./uploadFile/{today_str}/", uploaded_file)
+            st.session_state.file_full_path = file_utils.save_uploaded_file(f"./uploadFile/{today_str}/", uploaded_file)
 
             # API 호출
             API_BASE_URL = os.getenv("API_BASE_URL")
             request_data = {
                 "agent_id": st.session_state.get("ui_chat_agent_id", ""),
                 "agent_mode": st.session_state.get("ui_chat_agent_mode", ""),
-                "convrstnId": st.session_state.get("convrstn_id", str(uuid.uuid4())),
-                "fileFullPath": st.session_state.fileFullPath,
+                "conversation_id": st.session_state.get("conversation_id", str(uuid.uuid4())),
+                "fileFullPath": st.session_state.file_full_path,
                 "question": "",
                 "enableExtDocse": st.session_state.get("ui_enable_ext_docse", False),
             }

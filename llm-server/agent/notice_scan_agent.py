@@ -3,7 +3,7 @@ from typing import AsyncGenerator, Dict, Any, Optional, Literal, TypedDict
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, END
-from utils import config, mcpUtils
+from utils import config, mcp_utils
 from agent.notice_scan_structure import ProcurementData
 
 
@@ -74,7 +74,7 @@ class PureLangNoticeScanAgent:
         }
 
         try:
-            response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+            response = mcp_utils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
         except Exception as e:
             error_message = f"Markdown 변환 도구 호출 실패: {str(e)}"
             self.logger.error(f"[NoticeScan][convert_to_markdown] 실패 file_path={state['file_path']}: {error_message}")

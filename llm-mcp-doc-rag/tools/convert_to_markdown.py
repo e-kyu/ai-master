@@ -5,11 +5,11 @@ from typing import Dict, Any, Optional, Literal, TypedDict
 from markitdown import MarkItDown
 import pymupdf4llm
 
-from utils import config, loggerUtil
+from utils import config, logger_util
 
 
 # 로거 인스턴스 생성
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
 # LangGraph 상태 정의
 class GraphState(TypedDict):

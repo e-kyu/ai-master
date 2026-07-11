@@ -1,6 +1,6 @@
 import mcp.types as types
 
-def getList() -> list[types.Tool]:
+def get_list() -> list[types.Tool]:
     return [
         # ─────────────────────────────────────
         # 문서 기반 QnA

@@ -5,14 +5,14 @@ import os
 
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import IndexNode, TextNode
-from utils import loggerUtil
+from utils import logger_util
 
 
 
 class FallbackChunker:
     
     def __init__(self):
-        self.logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+        self.logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
     # ============================================================
     # 7. 기본 Fallback (조문/별표를 전혀 찾지 못한 문서용)

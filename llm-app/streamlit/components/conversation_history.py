@@ -8,16 +8,16 @@ from utils import config
 API_BASE_URL = config.settings.API_BASE_URL
 
 # API로 Q&A 이력 조회
-def fetch_convrstn_history():
+def fetch_conversation_history():
     """API를 통해 Q&A 이력 가져오기"""
     try:
-        response = requests.get(f"{API_BASE_URL}/convrstnHistory/")
+        response = requests.get(f"{API_BASE_URL}/conversation_history/")
         if response.status_code == 200:
-            convrstns = response.json()
-            # API 응답 형식에 맞게 데이터 변환 (convrstn_id, question, date)
+            conversations = response.json()
+            # API 응답 형식에 맞게 데이터 변환 (conversation_id, question, date)
             return [
-                (convrstn["convrstn_id"], convrstn["topic"], convrstn["created_at"], convrstn.get("agent_id", None), convrstn.get("mode", None), convrstn.get("name", None), convrstn.get("description", None))
-                for convrstn in convrstns
+                (conversation["conversation_id"], conversation["topic"], conversation["created_at"], conversation.get("agent_id", None), conversation.get("mode", None), conversation.get("name", None), conversation.get("description", None))
+                for conversation in conversations
             ]
         else:
             st.error(f"Q&A 이력 조회 실패: {response.status_code}")
@@ -28,14 +28,14 @@ def fetch_convrstn_history():
 
 
 # API로 특정 Q&A 데이터 조회
-def fetch_convrstn_by_convrstn_id(convrstn_id):
+def fetch_conversation_by_conversation_id(conversation_id):
     """API를 통해 특정 Q&A 데이터 가져오기"""
     try:
-        response = requests.get(f"{API_BASE_URL}/convrstnHistory/{convrstn_id}")
+        response = requests.get(f"{API_BASE_URL}/conversation_history/{conversation_id}")
         if response.status_code == 200:
-            convrstnDetails = response.json()
+            conversation_details = response.json()
 
-            return convrstnDetails
+            return conversation_details
         else:
             st.error(f"Q&A 데이터 조회 실패: {response.status_code}")
             return None, None
@@ -45,10 +45,10 @@ def fetch_convrstn_by_convrstn_id(convrstn_id):
 
 
 # API로 Q&A 삭제
-def delete_convrstn_by_convrstn_id(convrstn_id):
+def delete_conversation_by_conversation_id(conversation_id):
     """API를 통해 특정 Q&A 삭제"""
     try:
-        response = requests.delete(f"{API_BASE_URL}/convrstnHistory/{convrstn_id}")
+        response = requests.delete(f"{API_BASE_URL}/conversation_history/{conversation_id}")
         if response.status_code == 200:
             st.success("Q&A이 삭제되었습니다.")
             return True
@@ -61,18 +61,18 @@ def delete_convrstn_by_convrstn_id(convrstn_id):
 
 
 # API로 모든 Q&A 삭제
-def delete_all_convrstns():
+def delete_all_conversations():
     """API를 통해 모든 Q&A 삭제"""
     try:
         # 모든 Q&A 목록 조회
-        convrstns = fetch_convrstn_history()
-        if not convrstns:
+        conversations = fetch_conversation_history()
+        if not conversations:
             return True
 
         # 각 Q&A 항목 삭제
         success = True
-        for convrstn_id, _, _, _ in convrstns:
-            response = requests.delete(f"{API_BASE_URL}/convrstnHistory/{convrstn_id}")
+        for conversation_id, _, _, _ in conversations:
+            response = requests.delete(f"{API_BASE_URL}/conversation_history/{conversation_id}")
             if response.status_code != 200:
                 success = False
 

@@ -76,7 +76,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Any, TypedDict, Annotated
 
 from llama_index.core.schema import IndexNode, TextNode
-from utils import loggerUtil
+from utils import logger_util
 
 from langgraph.graph import StateGraph, START, END
 try:
@@ -86,7 +86,7 @@ except ImportError:  # 구버전 langgraph 호환
 
 
 # 이 파이프라인 전용 로거. 파일 어디서든 logger.info(...) / logger.warning(...) 로 로그를 남긴다.
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
 
 # ============================================================
@@ -1207,7 +1207,7 @@ def route_after_detect(state: GraphState) -> str:
 def node_fallback_chunk(state: GraphState) -> dict:
     logger.info("[LawChunker] fallback_chunk 시작")
     try:
-        from utils.chunkingPatterns.fallbackChunker import FallbackChunker  # 프로젝트 내 기존 폴백 구현체 (이 파일에는 포함되어 있지 않음)
+        from utils.chunking_patterns.fallback_chunker import FallbackChunker  # 프로젝트 내 기존 폴백 구현체 (이 파일에는 포함되어 있지 않음)
     except ImportError:
         # 폴백 모듈 자체를 못 찾는 경우, 파이프라인이 죽지 않도록 빈 결과를 반환하고
         # 경고만 남긴다(운영 환경 구성 문제를 조기에 로그로 알 수 있게).

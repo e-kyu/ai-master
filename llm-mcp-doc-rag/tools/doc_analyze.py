@@ -3,7 +3,7 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 import mcp.types as types
-from utils import ragUtils, config, loggerUtil
+from utils import rag_utils, config, logger_util
 import re
 import time
 import asyncio
@@ -11,7 +11,7 @@ from typing import List, TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 
 # 로거 인스턴스 생성
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
 # LangGraph 상태 정의
 class GraphState(TypedDict):
@@ -55,7 +55,7 @@ async def prepare_engines(state: GraphState):
             engines.extend(engine_list)
     
     if state['pdf_path']:
-        pdf_engine = ragUtils.make_rag_query_engine(state['pdf_path'], is_save=True, is_base_resource=False)
+        pdf_engine = rag_utils.make_rag_query_engine(state['pdf_path'], is_save=True, is_base_resource=False)
         engines.append(pdf_engine)
     
     return {"query_engines": engines}
@@ -127,7 +127,7 @@ async def execute_rag(state: GraphState):
     return {"retrieved_contexts": contexts}
 """
 
-async def execute(question: str, pdfFileFullPath: str = "" , agent_mode: str = "" ,allow_search: bool = False) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+async def execute(question: str, pdf_file_full_path: str = "" , agent_mode: str = "" ,allow_search: bool = False) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
     start_time = time.time()
     try:        
         # 워크플로우 그래프 구성
@@ -146,7 +146,7 @@ async def execute(question: str, pdfFileFullPath: str = "" , agent_mode: str = "
 
         initial_state = {
             "question": question,
-            "pdf_path": pdfFileFullPath,
+            "pdf_path": pdf_file_full_path,
             "agent_mode": agent_mode,
             "sub_questions": [],
             "query_engines": [],

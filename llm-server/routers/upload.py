@@ -4,7 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, UploadFile, File
 
-from utils import fileUtils
+from utils import file_utils
 
 router = APIRouter(prefix="/api/v1/upload", tags=["upload"])
 
@@ -20,6 +20,6 @@ async def upload_file(file: UploadFile = File(...)):
     stored_name = f"{uuid.uuid4().hex}_{safe_name}"
 
     content = await file.read()
-    file_full_path = fileUtils.save_uploaded_file(directory, stored_name, content)
+    file_full_path = file_utils.save_uploaded_file(directory, stored_name, content)
 
     return {"fileFullPath": file_full_path, "fileName": safe_name}

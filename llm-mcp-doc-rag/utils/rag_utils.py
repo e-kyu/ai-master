@@ -8,10 +8,10 @@ from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
 from pydantic import PrivateAttr
 
-from utils import loggerUtil
-from utils.chunkingPatterns.lawChunker import LawChunker
-from utils.chunkingPatterns.fallbackChunker import FallbackChunker
-from tools import convertToMarkdown
+from utils import logger_util
+from utils.chunking_patterns.law_chunker import LawChunker
+from utils.chunking_patterns.fallback_chunker import FallbackChunker
+from tools import convert_to_markdown
 
 from llama_index.core import VectorStoreIndex, StorageContext, load_index_from_storage, Document, SimpleDirectoryReader
 from llama_index.core.node_parser import SentenceSplitter
@@ -41,7 +41,7 @@ SIMILARITY_CUTOFF: float = 0.8
 # 확장자 및 무시 대상 정의
 _IGNORED_DIR_NAMES: set = {"__MACOSX"}
 
-logger = loggerUtil.get_logger("./log", "llm-mcp-doc-rag")
+logger = logger_util.get_logger("./log", "llm-mcp-doc-rag")
 
 
 # ==============================================================================
@@ -269,7 +269,7 @@ def _build_query_engine(file_retrievers: List[BaseRetriever], combined_node_dict
 # ==============================================================================
 # [공개 비즈니스 인터페이스 API]
 # ==============================================================================
-def getRagRetriever(md5_doc: str, is_base_resource: bool = False) -> Optional[RetrieverQueryEngine]:
+def get_rag_retriever(md5_doc: str, is_base_resource: bool = False) -> Optional[RetrieverQueryEngine]:
     """
     [저장 파일 기반 RAG 엔진 복원 API]
     문서의 MD5 해시 식별자 경로에 매핑 보관 중인 다중 파일 독립 FAISS 인덱스들을 로드하여 대등한 재귀식 쿼리 엔진 인터페이스를 반환합니다.
@@ -454,7 +454,7 @@ def make_rag_query_engine_from_docs(docs: List[Any], is_save: bool = False) -> O
         raise
 
 
-def getRagPromft() -> str:
+def get_rag_prompt() -> str:
     """RAG 프롬프트 컨텍스트 템플릿 스트링을 반환합니다."""
     return """
         You are an assistant for question-answering tasks. 

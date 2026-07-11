@@ -10,8 +10,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
 
-from utils import config, convrstnContextUtils, mcpUtils, defaultPrompt
-from repository import convrstn_repository
+from utils import config, conversation_context_utils, mcp_utils, default_prompt
+from repository import conversation_repository
 
 # 로거 인스턴스 생성
 logger = config.get_logger("./log", "llm-server")
@@ -44,10 +44,10 @@ class SystemInputForm(BaseModel):
 class AgentState(TypedDict):
     messages: List[BaseMessage]      # 전체 대화 내용 기록 기록부
     file_full_path: str              # 사용자가 업로드한 파일의 경로
-    convrstn_id: str                 # 대화 ID (세션 구분자)
-    convrstn_details_id:str          # 대화 내역 ID (질문-답변 쌍 구분자)
+    conversation_id: str                 # 대화 ID (세션 구분자)
+    conversation_details_id:str          # 대화 내역 ID (질문-답변 쌍 구분자)
     question: str                    # 사용자가 물어본 원래 질문
-    convrstn_context: str            # 대화의 맥락을 담은 텍스트 (대화 내역 + 외부 지식 등)
+    conversation_context: str            # 대화의 맥락을 담은 텍스트 (대화 내역 + 외부 지식 등)
     contextual_query: str            # 맥락이 강화된 질의문 (원래 질문 + 대화 맥락이 합쳐진 형태)
     queries: List[str]               # 에이전트가 순차적으로 다룰 질문 목록 (예: 1번 로봇이 3개의 질문을 만들어냈다면 ["질문1", "질문2", "질문3"])
     rag_answer: List[BaseMessage|SystemMessage]          # RAG 검색을 통해 찾아온 법령 텍스트 (규정 검토봇이 참고할 내용)
@@ -60,46 +60,46 @@ class AgentState(TypedDict):
     status: Literal["success", "failed"]  # 에이전트 상태 (성공/실패)
 
 
-def start_convrstn_node(state: AgentState) -> Dict[str, Any]:
-    """[Start Convrstn Agent] 대화 세션을 생성하고 이전 대화 맥락을 불러옵니다."""
-    logger.info(f"[Start Convrstn Agent] 시작 convrstn_id={state['convrstn_id']} question={state['question'][:50]}")
+def start_conversation_node(state: AgentState) -> Dict[str, Any]:
+    """[Start Conversation Agent] 대화 세션을 생성하고 이전 대화 맥락을 불러옵니다."""
+    logger.info(f"[Start Conversation Agent] 시작 conversation_id={state['conversation_id']} question={state['question'][:50]}")
 
     # 대화 ID로 대화 시작 기록 생성
-    convrstn_repository.create_convrstn(state['convrstn_id'], {"topic": state['question']})
+    conversation_repository.create_conversation(state['conversation_id'], {"topic": state['question']})
 
     # 대화의 맥락을 조회 또는 생성
-    convrstn_context = convrstnContextUtils.get_convrstn_context(state['convrstn_id'], state['question'])
+    conversation_context = conversation_context_utils.get_conversation_context(state['conversation_id'], state['question'])
 
-    logger.info(f"[Start Convrstn Agent] 완료 convrstn_id={state['convrstn_id']}")
+    logger.info(f"[Start Conversation Agent] 완료 conversation_id={state['conversation_id']}")
     # 알아낸 정보를 공유 가방에 저장하고, 다음 바톤을 넘겨줄 로봇 이름을 지정합니다.
     return {
-        "convrstn_context": convrstn_context,
+        "conversation_context": conversation_context,
     }
 
 
 def query_rewrite_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 1: 파싱 전문봇] 비정형 줄글 텍스트를 분석해 규격화된 서식(JSON)을 만듭니다."""
-    logger.info(f"[Query Rewrite Agent] 시작 convrstn_id={state['convrstn_id']}")
+    logger.info(f"[Query Rewrite Agent] 시작 conversation_id={state['conversation_id']}")
 
     # 강화된 질의문 생성
-    contextual_query = convrstnContextUtils.enhance_query_with_context(state['convrstn_context'], state['question'])
+    contextual_query = conversation_context_utils.enhance_query_with_context(state['conversation_context'], state['question'])
 
     # 대화내역에 강화된 질의문과 맥락 저장 (질의문과 답변이 같은 테이블에 저장되도록 수정)
-    create_convrstn_question = convrstn_repository.create_convrstn_question(state['convrstn_id'], {"context": json.dumps(state['convrstn_context'], ensure_ascii=False), "question": state['question'], "enhanced_question": contextual_query})
+    create_conversation_question = conversation_repository.create_conversation_question(state['conversation_id'], {"context": json.dumps(state['conversation_context'], ensure_ascii=False), "question": state['question'], "enhanced_question": contextual_query})
 
-    logger.info(f"[Query Rewrite Agent] 완료 convrstn_id={state['convrstn_id']} contextual_query={contextual_query[:100]}")
+    logger.info(f"[Query Rewrite Agent] 완료 conversation_id={state['conversation_id']} contextual_query={contextual_query[:100]}")
     # 알아낸 정보를 공유 가방에 저장하고, 다음 바톤을 넘겨줄 로봇 이름을 지정합니다.
     return {
-        "convrstn_details_id": create_convrstn_question.convrstn_details_id,
+        "conversation_details_id": create_conversation_question.convrstn_details_id,
         "contextual_query": contextual_query
     }
 
 
 def qna_doc_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 2: 규정 검토봇] 사용자가 첨부한 파일을 RAG탐색하여 질의문의 내용을 찾아옵니다."""
-    logger.info(f"[Document Search Agent] 시작 convrstn_id={state.get('convrstn_id')} file={state.get('file_full_path')}")
+    logger.info(f"[Document Search Agent] 시작 conversation_id={state.get('conversation_id')} file={state.get('file_full_path')}")
     if not state["file_full_path"]:
-        logger.info(f"[Document Search Agent] 첨부 파일 없어 건너뜀 convrstn_id={state.get('convrstn_id')}")
+        logger.info(f"[Document Search Agent] 첨부 파일 없어 건너뜀 conversation_id={state.get('conversation_id')}")
         return {
             "qna_doc_answer": ""
         }
@@ -110,11 +110,11 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
     }
 
     try:
-        logger.debug(f"Calling tool qna_doc for convrstn_id={state.get('convrstn_id')} file={state.get('file_full_path')}")
-        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+        logger.debug(f"Calling tool qna_doc for conversation_id={state.get('conversation_id')} file={state.get('file_full_path')}")
+        response = mcp_utils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(f"[Document Search Agent] 실패 convrstn_id={state.get('convrstn_id')}: {error_message}")
+        logger.error(f"[Document Search Agent] 실패 conversation_id={state.get('conversation_id')}: {error_message}")
 
         return {
             "status": "failed",
@@ -123,7 +123,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
 
     rag_answer = response.get("response") if isinstance(response, dict) else None
 
-    logger.info(f"[Document Search Agent] 완료 convrstn_id={state.get('convrstn_id')} answer_length={len(rag_answer) if rag_answer else 0}")
+    logger.info(f"[Document Search Agent] 완료 conversation_id={state.get('conversation_id')} answer_length={len(rag_answer) if rag_answer else 0}")
     # 찾아낸 리스크 리스트를 공유 가방에 담고, 전체 프로세스를 끝마칩니다(Output_Agent로 이동).
     return {
         "qna_doc_answer": rag_answer
@@ -132,7 +132,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
 
 def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 3: 규정 검토봇] 법령, 가이드 파일로 준비된 VectorDB를 RAG탐색하여 질의문의 내용을 찾아옵니다."""
-    logger.info(f"[Law Base Search Agent] 시작 convrstn_id={state.get('convrstn_id')}")
+    logger.info(f"[Law Base Search Agent] 시작 conversation_id={state.get('conversation_id')}")
     # TODO: 질의문과 맥락으로 agent_mode를 결정하는 로직을 추가해야 합니다. 현재는 임시로 PpsStockpilingAgent로 고정되어 있습니다.
     """
                     "agent_mode": {
@@ -171,10 +171,10 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
                 "- None\n"
                 )
     try:
-        logger.debug(f"Determining agent_mode for convrstn_id={state.get('convrstn_id')}")
-        llm_response = llm.invoke(prompt.format(contextual_query=state["contextual_query"], context=state["convrstn_context"]))
+        logger.debug(f"Determining agent_mode for conversation_id={state.get('conversation_id')}")
+        llm_response = llm.invoke(prompt.format(contextual_query=state["contextual_query"], context=state["conversation_context"]))
     except Exception as e:
-        logger.error(f"agent_mode determination failed for convrstn_id={state.get('convrstn_id')}: {e}")
+        logger.error(f"agent_mode determination failed for conversation_id={state.get('conversation_id')}: {e}")
         llm_response = None
 
 
@@ -190,7 +190,7 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
             "조달청 비축 관련 상담\n"
             "선택하신 분야를 기준으로 상담을 이어가겠습니다."
         )
-        logger.error(f"[Law Base Search Agent] agent_mode missing convrstn_id={state.get('convrstn_id')}")
+        logger.error(f"[Law Base Search Agent] agent_mode missing conversation_id={state.get('conversation_id')}")
         return {
             "status": "failed",
             "error_message": error_message,
@@ -217,13 +217,13 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
             "조달청 비축 관련 상담\n"
             "선택하신 분야를 기준으로 상담을 이어가겠습니다."
         )
-        logger.error(f"[Law Base Search Agent] invalid agent_mode convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}")
+        logger.error(f"[Law Base Search Agent] invalid agent_mode conversation_id={state.get('conversation_id')} agent_mode={agent_mode}")
         return {
             "status": "failed",
             "error_message": error_message,
         }
 
-    logger.info(f"[Law Base Search Agent] agent_mode 결정 convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}")
+    logger.info(f"[Law Base Search Agent] agent_mode 결정 conversation_id={state.get('conversation_id')} agent_mode={agent_mode}")
 
     tool_info = {
         "tool": "qna_law_base",
@@ -233,11 +233,11 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
 
 
     try:
-        logger.debug(f"Calling tool qna_law_base with agent_mode={agent_mode} convrstn_id={state.get('convrstn_id')}")
-        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+        logger.debug(f"Calling tool qna_law_base with agent_mode={agent_mode} conversation_id={state.get('conversation_id')}")
+        response = mcp_utils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(f"[Law Base Search Agent] 실패 convrstn_id={state.get('convrstn_id')} agent_mode={agent_mode}: {error_message}")
+        logger.error(f"[Law Base Search Agent] 실패 conversation_id={state.get('conversation_id')} agent_mode={agent_mode}: {error_message}")
 
         return {
             "status": "failed",
@@ -255,18 +255,18 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
 
 def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
     """[에이전트 4: 규정 검토봇] 인터넷 검색 결과를 RAG 검색을 통해 관련 법령 텍스트를 찾아옵니다."""
-    logger.info(f"[Web Search Agent] 시작 convrstn_id={state.get('convrstn_id')}")
+    logger.info(f"[Web Search Agent] 시작 conversation_id={state.get('conversation_id')}")
     tool_info = {
         "tool": "qna_web_search",
         "input": {"question":state["contextual_query"], "allow_search": True},
     }
 
     try:
-        logger.debug(f"Calling tool qna_web_search for convrstn_id={state.get('convrstn_id')}")
-        response = mcpUtils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
+        logger.debug(f"Calling tool qna_web_search for conversation_id={state.get('conversation_id')}")
+        response = mcp_utils.call_tool(config.settings.MCP_DOC_RAG_URL, tool_info)
     except Exception as e:
         error_message = f"{tool_info['tool']} 도구 호출 실패: {str(e)}"
-        logger.error(f"[Web Search Agent] 실패 convrstn_id={state.get('convrstn_id')}: {error_message}")
+        logger.error(f"[Web Search Agent] 실패 conversation_id={state.get('conversation_id')}: {error_message}")
 
         return {
             "status": "failed",
@@ -284,13 +284,13 @@ def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
 
 def check_enable_ext_docs(state: AgentState) -> Literal["law_base", "web_search"]:
     branch = "web_search" if state["enable_ext_docs"] else "law_base"
-    logger.info(f"[Router] enable_ext_docs={state['enable_ext_docs']} -> '{branch}' 노드로 분기 convrstn_id={state.get('convrstn_id')}")
+    logger.info(f"[Router] enable_ext_docs={state['enable_ext_docs']} -> '{branch}' 노드로 분기 conversation_id={state.get('conversation_id')}")
     if state["enable_ext_docs"] == False:
         return "law_base"
     return "web_search"
 
 
-async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, enable_ext_docs: bool) -> Any:
+async def run(agent_info, conversation_id: str, question: str, file_full_path: str, enable_ext_docs: bool) -> Any:
     # ----------------------------------------------------------------------
     # 4. LangGraph 파이프라인(협업 지도) 구성
     # ----------------------------------------------------------------------
@@ -298,17 +298,17 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
     workflow = StateGraph(AgentState)
 
     # 1. 일꾼(노드) 등록하기
-    workflow.add_node("Start Convrstn Agent", start_convrstn_node)
+    workflow.add_node("Start Conversation Agent", start_conversation_node)
     workflow.add_node("Query Rewrite Agent", query_rewrite_node)
     workflow.add_node("Document Search Agent", qna_doc_node)
     workflow.add_node("Law Base Search Agent", qna_law_base_node)
     workflow.add_node("Web Search Agent", qna_web_search_node)
 
     # 2. 이동 경로(엣지) 연결하기
-    workflow.set_entry_point("Start Convrstn Agent")                 # 시작은 무조건 파싱 전문봇이 합니다.
-    workflow.add_edge("Start Convrstn Agent", "Query Rewrite Agent") # 파싱이 끝나면 자동으로 법령 검토봇에게 이동합니다.
+    workflow.set_entry_point("Start Conversation Agent")                 # 시작은 무조건 파싱 전문봇이 합니다.
+    workflow.add_edge("Start Conversation Agent", "Query Rewrite Agent") # 파싱이 끝나면 자동으로 법령 검토봇에게 이동합니다.
     workflow.add_edge("Query Rewrite Agent", "Document Search Agent") # 법령 검토까지 끝나면 모든 워크플로우를 마칩니다(END).
-    
+
     workflow.add_conditional_edges(
         "Document Search Agent",
         check_enable_ext_docs,
@@ -328,7 +328,7 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
     # 2. 실행할 때 초기값(Initial State)을 딕셔너리로 세팅합니다.
     # ----------------------------------------------------------------------
     initial_values = {
-        "convrstn_id": convrstn_id,
+        "conversation_id": conversation_id,
         "question": question,
         "file_full_path": file_full_path,
         "enable_ext_docs": enable_ext_docs,
@@ -338,10 +338,10 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
         "qna_web_search_answer" : "",
     }
 
-    logger.info(f"Starting agent run: convrstn_id={convrstn_id} question={question[:50]}")
+    logger.info(f"Starting agent run: conversation_id={conversation_id} question={question[:50]}")
     # 3. 인보크(또는 스트림)할 때 첫 번째 인자로 전달합니다.
     agent_state = await app_graph.ainvoke(initial_values)
-    logger.info(f"Completed workflow for convrstn_id={convrstn_id}")
+    logger.info(f"Completed workflow for conversation_id={conversation_id}")
     logger.debug(f"agent_state keys: {list(agent_state.keys())}")
 
 
@@ -352,10 +352,10 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
     )
 
     if not agent_info.persona_prompt:
-        agent_info.persona_prompt = defaultPrompt.persona_prompt
-    
+        agent_info.persona_prompt = default_prompt.persona_prompt
+
     if not agent_info.final_prompt:
-        agent_info.final_prompt = defaultPrompt.final_prompt
+        agent_info.final_prompt = default_prompt.final_prompt
 
     final_prompt = final_prompt.format(persona_prompt=agent_info.persona_prompt if agent_info else ""
                                     , final_answer_prompt=agent_info.final_prompt if agent_info else ""
@@ -363,7 +363,7 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
     
     final_prompt += (
         "# INPUT DATA\n"
-        f"- **Conversation Context:** {agent_state['convrstn_context']}\n"
+        f"- **Conversation Context:** {agent_state['conversation_context']}\n"
         f"- **Original Question:** {agent_state['question']}\n"
         f"- **Enhanced Query:** {agent_state['contextual_query']}\n\n"
     )
@@ -379,6 +379,6 @@ async def run(agent_info, convrstn_id: str, question: str, file_full_path: str, 
         agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_law_base_answer', '')))
         agent_state['rag_answer'].append(SystemMessage(content=agent_state.get('qna_web_search_answer', '')))
 
-    logger.info(f"Prepared final RAG messages for convrstn_id={convrstn_id}")
+    logger.info(f"Prepared final RAG messages for conversation_id={conversation_id}")
 
     return agent_state
