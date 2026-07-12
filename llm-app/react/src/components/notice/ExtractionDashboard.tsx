@@ -8,27 +8,25 @@ import { useIsMobile } from "../../hooks/useIsMobile"
 // ─── Field definitions ───────────────────────────────────────────────────────
 
 const FIELD_DEFS: { key: string; label: string; section: "general" | "execution" }[] = [
-  { key: "noticeNo",        label: "공고번호",      section: "general" },
+  { key: "noticeType",      label: "공고종류",     section: "general" },
+  { key: "noticeNo",        label: "입찰공고번호",      section: "general" },
   { key: "noticeName",      label: "공고명",        section: "general" },
-  { key: "noticeType",      label: "공고 종류",     section: "general" },
   { key: "agency",          label: "공고기관",      section: "general" },
   { key: "demandAgency",    label: "수요기관",      section: "general" },
-  { key: "contractType",    label: "계약 종류",     section: "general" },
-  { key: "contractMethod",  label: "계약 방법",     section: "general" },
-  { key: "bidMethod",       label: "입찰 방법",     section: "general" },
+  { key: "contractType",    label: "계약구분",     section: "general" },
+  { key: "contractMethod",  label: "계약형태",     section: "general" },
+  { key: "bidMethod",       label: "입찰방식",     section: "general" },
+  { key: "stockType",       label: "비축구분",     section: "general" },
   { key: "awardMethod",     label: "낙찰 방법",     section: "general" },
   { key: "awardDetail",     label: "낙찰 상세",     section: "general" },
-  { key: "stockType",       label: "비축 구분",     section: "general" },
-  { key: "postDate",        label: "게시일시",      section: "general" },
   { key: "rebidYn",         label: "재입찰 여부",   section: "general" },
-  { key: "manager",         label: "담당자",        section: "execution" },
-  { key: "bidStartDate",    label: "입찰 시작",     section: "execution" },
-  { key: "bidEndDate",      label: "입찰 마감",     section: "execution" },
-  { key: "openDate",        label: "개찰일시",      section: "execution" },
+
+  { key: "manager",         label: "공고담당자",        section: "execution" },
+  { key: "bidStartDate",    label: "입찰개시일시",     section: "execution" },
+  { key: "bidEndDate",      label: "입찰마감일시",     section: "execution" },
+  { key: "openDate",        label: "개찰(입찰)일시",      section: "execution" },
   { key: "openPlace",       label: "개찰장소",      section: "execution" },
-  { key: "depositExemptYn", label: "보증금 면제",   section: "execution" },
-  { key: "depositDate",     label: "보증금 납부일", section: "execution" },
-  { key: "relatedNotice",   label: "관련 공고",     section: "execution" },
+  { key: "depositExemptYn", label: "보증서보증금금 면제여부",   section: "execution" },
 ]
 
 interface FlatField {
