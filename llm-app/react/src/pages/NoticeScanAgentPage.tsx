@@ -144,7 +144,7 @@ function UploadZone({
 
 // ─── Analyzing overlay (pipeline strip + progress) ────────────────────────────
 
-function AnalyzingView({ progressSteps, pipeline, logs }: { progressSteps: ProgressStep[]; pipeline: PipelineStep[]; logs: ReasoningLogEvent[] }) {
+function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressStep[]; pipeline: PipelineStep[] }) {
   const isMobile = useIsMobile()
 
   return (
@@ -219,8 +219,6 @@ function AnalyzingView({ progressSteps, pipeline, logs }: { progressSteps: Progr
           </div>
         </div>
 
-        {/* 실행 로그 (Deep Reasoning) */}
-        <ReasoningLogTerminal logs={logs} active defaultOpen />
       </div>
     </div>
   )
@@ -236,6 +234,7 @@ export function NoticeScanAgentPage() {
   const [result, setResult] = useState<NoticeScanResult | null>(null)
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([])
   const [logs, setLogs] = useState<ReasoningLogEvent[]>([])
+  const [logsPanelOpen, setLogsPanelOpen] = useState(true)
   const [errorMsg, setErrorMsg] = useState("")
   const [elapsedSec, setElapsedSec] = useState<number | null>(null)
   const startTimeRef = useRef<number>(0)
@@ -284,6 +283,7 @@ export function NoticeScanAgentPage() {
     if (!file) return
 
     setFileName(file.name); setResult(null); setProgressSteps([]); setLogs([]); setErrorMsg("")
+    setLogsPanelOpen(true)
     setPageStatus("uploading")
 
     try {
@@ -414,23 +414,57 @@ export function NoticeScanAgentPage() {
       )}
 
       {/* ── Main content area ── */}
-      {pageStatus === "idle" || pageStatus === "uploading" || pageStatus === "error" ? (
-        <UploadZone pageStatus={pageStatus} fileName={fileName} errorMsg={errorMsg} onFileChange={handleFileChange} />
-      ) : pageStatus === "analyzing" ? (
-        <AnalyzingView progressSteps={progressSteps} pipeline={pipelineSteps} logs={logs} />
-      ) : isDashboard ? (
-        <ExtractionDashboard result={result!} fileName={fileName ?? ""} />
-      ) : (
-        /* Fallback for done but no structured data */
-        <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 14 : 24 }}>
-          <div style={{ maxWidth: 640, margin: "0 auto", background: "#fff", borderRadius: 14, border: "1px solid #F0D8AE", padding: isMobile ? 16 : 24 }}>
-            <p style={{ fontSize: 13, color: "#B5701A", marginBottom: 12 }}>⚠️ 구조화 데이터를 추출하지 못했습니다.</p>
-            <pre style={{ maxHeight: 480, overflow: "auto", background: "#1A1F29", color: "#E5E9F0", borderRadius: 10, padding: 16, fontSize: isMobile ? 11 : 12, lineHeight: 1.7 }}>
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          </div>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "row" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          {pageStatus === "idle" || pageStatus === "uploading" || pageStatus === "error" ? (
+            <UploadZone pageStatus={pageStatus} fileName={fileName} errorMsg={errorMsg} onFileChange={handleFileChange} />
+          ) : pageStatus === "analyzing" ? (
+            <AnalyzingView progressSteps={progressSteps} pipeline={pipelineSteps} />
+          ) : isDashboard ? (
+            <ExtractionDashboard result={result!} fileName={fileName ?? ""} />
+          ) : (
+            /* Fallback for done but no structured data */
+            <div style={{ flex: 1, overflowY: "auto", padding: isMobile ? 14 : 24 }}>
+              <div style={{ maxWidth: 640, margin: "0 auto", background: "#fff", borderRadius: 14, border: "1px solid #F0D8AE", padding: isMobile ? 16 : 24 }}>
+                <p style={{ fontSize: 13, color: "#B5701A", marginBottom: 12 }}>⚠️ 구조화 데이터를 추출하지 못했습니다.</p>
+                <pre style={{ maxHeight: 480, overflow: "auto", background: "#1A1F29", color: "#E5E9F0", borderRadius: 10, padding: 16, fontSize: isMobile ? 11 : 12, lineHeight: 1.7 }}>
+                  {JSON.stringify(result, null, 2)}
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+
+        {/* ── 실행 로그 (Deep Reasoning) — 슬라이드 패널 ── */}
+        {logs.length > 0 && (
+          <div className="relative flex shrink-0">
+            <button
+              onClick={() => setLogsPanelOpen((v) => !v)}
+              title={logsPanelOpen ? "로그 패널 숨기기" : "로그 패널 보기"}
+              className="absolute top-4 -left-3 z-10 flex size-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-zinc-300 shadow hover:bg-zinc-700"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                className={`size-3.5 transition-transform ${logsPanelOpen ? "rotate-180" : ""}`}
+              >
+                <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <div
+              className={`flex flex-col overflow-hidden border-l border-zinc-800 bg-[#0B0F17] py-3 transition-all duration-300 ease-in-out ${
+                logsPanelOpen ? "w-[32vw] px-4 opacity-100" : "w-0 px-0 opacity-0"
+              }`}
+            >
+              <div className="w-[32vw] shrink-0">
+                <ReasoningLogTerminal logs={logs} active={pageStatus === "analyzing"} defaultOpen maxHeight="calc(100vh - 8rem)" />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

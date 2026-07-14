@@ -14,9 +14,10 @@ interface Props {
   logs: ReasoningLogEvent[]
   active?: boolean
   defaultOpen?: boolean
+  maxHeight?: number | string
 }
 
-export function ReasoningLogTerminal({ logs, active, defaultOpen = true }: Props) {
+export function ReasoningLogTerminal({ logs, active, defaultOpen = true, maxHeight = 260 }: Props) {
   const [open, setOpen] = useState(defaultOpen)
   const bottomRef = useRef<HTMLDivElement>(null)
 
@@ -66,7 +67,7 @@ export function ReasoningLogTerminal({ logs, active, defaultOpen = true }: Props
       </button>
 
       {open && (
-        <div style={{ maxHeight: 260, overflowY: "auto", padding: "0 14px 12px", borderTop: "1px solid #1F2937" }}>
+        <div style={{ maxHeight, overflowY: "auto", padding: "0 14px 12px", borderTop: "1px solid #1F2937" }}>
           {logs.length === 0 ? (
             <div style={{ padding: "12px 0", fontSize: 12, color: "#5B6577", fontFamily: "'IBM Plex Mono', monospace" }}>
               에이전트 실행을 기다리는 중...

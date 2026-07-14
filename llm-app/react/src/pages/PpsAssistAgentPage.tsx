@@ -22,6 +22,7 @@ export function PpsAssistAgentPage() {
 
   const [sending, setSending] = useState(false)
   const [logs, setLogs] = useState<ReasoningLogEvent[]>([])
+  const [logsPanelOpen, setLogsPanelOpen] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const autoSentRef = useRef(false)
@@ -35,6 +36,7 @@ export function PpsAssistAgentPage() {
     appendMessage({ question, answer: "" })
     setSending(true)
     setLogs([])
+    setLogsPanelOpen(true)
     try {
       await askQuestionStreaming(
         {
@@ -77,41 +79,68 @@ export function PpsAssistAgentPage() {
 
   if (!selectedAgent) return null
 
+  const showLogs = logs.length > 0
+
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col">
-      <div className="border-b border-zinc-100 px-4 py-4 sm:px-6">
-        <p className="mt-0.5 text-sm text-zinc-500">{selectedAgent.description}</p>
-        <label className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
-          <input
-            type="checkbox"
-            checked={enableExtDocse}
-            onChange={(e) => setEnableExtDocse(e.target.checked)}
-            className="size-3.5 rounded border-zinc-300 text-brand-600 focus:ring-brand-400"
-          />
-          외부 문서 검색 허용
-        </label>
+    <div className={`mx-auto flex h-full ${showLogs ? "max-w-[95vw] flex-row" : "max-w-3xl flex-col"}`}>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="border-b border-zinc-100 px-4 py-4 sm:px-6">
+          <p className="mt-0.5 text-sm text-zinc-500">{selectedAgent.description}</p>
+          <label className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
+            <input
+              type="checkbox"
+              checked={enableExtDocse}
+              onChange={(e) => setEnableExtDocse(e.target.checked)}
+              className="size-3.5 rounded border-zinc-300 text-brand-600 focus:ring-brand-400"
+            />
+            외부 문서 검색 허용
+          </label>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+          {messages.length === 0 ? (
+            <EmptyState title="대화를 시작해보세요" description="궁금한 내용을 입력하면 답변을 받아볼 수 있습니다." />
+          ) : (
+            <div className="flex flex-col gap-5">
+              {messages.map((m, i) => (
+                <ChatMessageBubble key={i} message={m} streaming={sending && i === messages.length - 1} />
+              ))}
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        <ChatInput disabled={sending} onSend={handleSend} />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-        {messages.length === 0 ? (
-          <EmptyState title="대화를 시작해보세요" description="궁금한 내용을 입력하면 답변을 받아볼 수 있습니다." />
-        ) : (
-          <div className="flex flex-col gap-5">
-            {messages.map((m, i) => (
-              <ChatMessageBubble key={i} message={m} streaming={sending && i === messages.length - 1} />
-            ))}
+      {showLogs && (
+        <div className="relative flex shrink-0">
+          <button
+            onClick={() => setLogsPanelOpen((v) => !v)}
+            title={logsPanelOpen ? "로그 패널 숨기기" : "로그 패널 보기"}
+            className="absolute top-4 -left-3 z-10 flex size-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-800 text-zinc-300 shadow hover:bg-zinc-700"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              className={`size-3.5 transition-transform ${logsPanelOpen ? "rotate-180" : ""}`}
+            >
+              <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div
+            className={`flex flex-col overflow-hidden border-l border-zinc-800 bg-[#0B0F17] py-3 transition-all duration-300 ease-in-out ${
+              logsPanelOpen ? "w-[32vw] px-4 opacity-100" : "w-0 px-0 opacity-0"
+            }`}
+          >
+            <div className="w-[32vw] shrink-0">
+              <ReasoningLogTerminal logs={logs} active={sending} defaultOpen={sending} maxHeight="calc(100vh - 8rem)" />
+            </div>
           </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {logs.length > 0 && (
-        <div className="px-4 pb-3 sm:px-6">
-          <ReasoningLogTerminal logs={logs} active={sending} defaultOpen={sending} />
         </div>
       )}
-
-      <ChatInput disabled={sending} onSend={handleSend} />
     </div>
   )
 }

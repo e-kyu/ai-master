@@ -119,7 +119,7 @@ def qna_doc_node(state: AgentState) -> Dict[str, Any]:
         }
 
         response = mcp_utils.call_tool_with_self_correction(
-            rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="Doc-RAG MCP (첨부문서 RAG)"
+            rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="mcp-tools (첨부문서 RAG)"
         )
 
         if response.get("status") != "success":
@@ -265,7 +265,7 @@ def qna_law_base_node(state: AgentState) -> Dict[str, Any]:
     }
 
     response = mcp_utils.call_tool_with_self_correction(
-        rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="Doc-RAG MCP (법령 RAG)"
+        rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="mcp-tools (법령 RAG)"
     )
 
     if response.get("status") != "success":
@@ -296,7 +296,7 @@ def qna_web_search_node(state: AgentState) -> Dict[str, Any]:
     }
 
     response = mcp_utils.call_tool_with_self_correction(
-        rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="Doc-RAG MCP (웹 검색 RAG)"
+        rlog, config.settings.MCP_DOC_RAG_URL, tool_info, context_name="mcp-tools (웹 검색 RAG)"
     )
 
     if response.get("status") != "success":

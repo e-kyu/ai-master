@@ -5,7 +5,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, END
 from utils import config, mcp_utils
-from utils.reasoning_log import ReasoningLog
+from utils.reasoning_log import ReasoningLog, planning_event
 from agent.notice_scan_structure import ProcurementData
 
 AGENT_NAME = "NoticeScanAgent"
@@ -71,7 +71,7 @@ class PureLangNoticeScanAgent:
         writer = get_stream_writer()
         rlog = ReasoningLog(self.logger, writer, AGENT_NAME)
         self.logger.info(f"[NoticeScan][convert_to_markdown] 시작 file_path={state['file_path']}")
-        rlog.mcp_call("doc-rag", "convert_to_markdown", {"file_path": state["file_path"]})
+        rlog.mcp_call("mcp-tools", "convert_to_markdown", {"file_path": state["file_path"]})
         writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "running", "message": "문서를 마크다운으로 변환하는 중..."})
 
         tool_info = {
@@ -121,6 +121,7 @@ class PureLangNoticeScanAgent:
         writer = get_stream_writer()
         rlog = ReasoningLog(self.logger, writer, AGENT_NAME)
         self.logger.info(f"[NoticeScan][extract_metadata] 시작 file_path={state['file_path']}")
+
         answer_model = config.describe_llm_model()
         rlog.llm_call(
             answer_model,
@@ -201,6 +202,17 @@ class PureLangNoticeScanAgent:
 
         # Notify overall start
         self.logger.info(f"[NoticeScan][run_stream] 파이프라인 시작 file_path={file_path}")
+
+        # PLANNING: 그래프 진입 전이라 get_stream_writer()가 동작하지 않으므로 빌더 함수를 직접 호출해 yield한다.
+        # 아래 두 단계는 _build_workflow()에 실제로 정의된 노드(convert_to_markdown, extract_metadata)와 1:1 대응한다.
+        plan_event, plan_text = planning_event(AGENT_NAME, [
+            {"label": "파이프라인 초기화 및 입력 파일 검증", "tool": "initialize_pipeline"},
+            {"label": "문서 변환 (PDF/HTML → Markdown)", "tool": "convert_to_markdown"},
+            {"label": "필수 항목 구조화 추출 및 규정 위반 검증", "tool": "extract_metadata"},
+        ])
+        self.logger.info(f"[{AGENT_NAME}] {plan_text}")
+        yield plan_event
+
         yield {"type": "progress", "step": "pipeline", "label": "파이프라인", "status": "running", "message": "파이프라인 실행 중..."}
 
         # 컴파일된 워크플로우를 스트리밍합니다: "custom"은 get_stream_writer()를 통해 전달되는
