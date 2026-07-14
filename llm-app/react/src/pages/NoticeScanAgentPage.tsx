@@ -3,9 +3,10 @@ import { useAppState } from "../context/appStateStore"
 import { uploadFile } from "../api/upload"
 import { analyzeNoticeStreaming } from "../api/qna"
 import { Spinner } from "../components/common/Spinner"
+import { ReasoningLogTerminal } from "../components/common/ReasoningLogTerminal"
 import { PipelineStrip, type PipelineStep, type StepStatus } from "../components/notice/PipelineStrip"
 import { DonutSummary, ExtractionDashboard, flattenFields } from "../components/notice/ExtractionDashboard"
-import type { AgentProgressEvent, NoticeScanResult } from "../types"
+import type { AgentProgressEvent, NoticeScanResult, ReasoningLogEvent } from "../types"
 import { useIsMobile } from "../hooks/useIsMobile"
 
 type PageStatus = "idle" | "uploading" | "analyzing" | "done" | "error"
@@ -143,11 +144,11 @@ function UploadZone({
 
 // ─── Analyzing overlay (pipeline strip + progress) ────────────────────────────
 
-function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressStep[]; pipeline: PipelineStep[] }) {
+function AnalyzingView({ progressSteps, pipeline, logs }: { progressSteps: ProgressStep[]; pipeline: PipelineStep[]; logs: ReasoningLogEvent[] }) {
   const isMobile = useIsMobile()
 
   return (
-    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9", padding: isMobile ? 14 : 24 }}>
+    <div style={{ display: "flex", flex: 1, alignItems: "center", justifyContent: "center", background: "#F4F6F9", padding: isMobile ? 14 : 24, overflowY: "auto" }}>
       <div style={{ width: "100%", maxWidth: 480, display: "flex", flexDirection: "column", gap: 14 }}>
 
         {/* Live pipeline mini view */}
@@ -217,6 +218,9 @@ function AnalyzingView({ progressSteps, pipeline }: { progressSteps: ProgressSte
             ))}
           </div>
         </div>
+
+        {/* 실행 로그 (Deep Reasoning) */}
+        <ReasoningLogTerminal logs={logs} active defaultOpen />
       </div>
     </div>
   )
@@ -231,6 +235,7 @@ export function NoticeScanAgentPage() {
   const [fileName, setFileName] = useState<string | null>(null)
   const [result, setResult] = useState<NoticeScanResult | null>(null)
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([])
+  const [logs, setLogs] = useState<ReasoningLogEvent[]>([])
   const [errorMsg, setErrorMsg] = useState("")
   const [elapsedSec, setElapsedSec] = useState<number | null>(null)
   const startTimeRef = useRef<number>(0)
@@ -238,7 +243,7 @@ export function NoticeScanAgentPage() {
   // Restore from conversation history
   useEffect(() => {
     if (messages.length === 0) {
-      setPageStatus("idle"); setFileName(null); setResult(null); setProgressSteps([]); setElapsedSec(null)
+      setPageStatus("idle"); setFileName(null); setResult(null); setProgressSteps([]); setLogs([]); setElapsedSec(null)
       return
     }
     const last = messages[messages.length - 1]
@@ -246,7 +251,7 @@ export function NoticeScanAgentPage() {
     try {
       const parsed = JSON.parse(last.answer) as NoticeScanResult
       setFileName(last.question.split(/[/\\]/).pop() ?? last.question)
-      setResult(parsed); setPageStatus("done"); setProgressSteps([]); setElapsedSec(null)
+      setResult(parsed); setPageStatus("done"); setProgressSteps([]); setLogs([]); setElapsedSec(null)
     } catch { /* not a notice result */ }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [convrstnId])
@@ -256,7 +261,7 @@ export function NoticeScanAgentPage() {
   if (!selectedAgent) return null
 
   const reset = () => {
-    setPageStatus("idle"); setFileName(null); setResult(null); setProgressSteps([]); setErrorMsg(""); setElapsedSec(null)
+    setPageStatus("idle"); setFileName(null); setResult(null); setProgressSteps([]); setLogs([]); setErrorMsg(""); setElapsedSec(null)
   }
 
   const handleProgressEvent = (event: AgentProgressEvent) => {
@@ -269,12 +274,16 @@ export function NoticeScanAgentPage() {
     })
   }
 
+  const handleLogEvent = (event: ReasoningLogEvent) => {
+    setLogs((prev) => [...prev, event])
+  }
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     e.target.value = ""
     if (!file) return
 
-    setFileName(file.name); setResult(null); setProgressSteps([]); setErrorMsg("")
+    setFileName(file.name); setResult(null); setProgressSteps([]); setLogs([]); setErrorMsg("")
     setPageStatus("uploading")
 
     try {
@@ -285,6 +294,7 @@ export function NoticeScanAgentPage() {
       const res = await analyzeNoticeStreaming(
         { agent_id: selectedAgent.agent_id, agent_mode: selectedAgent.mode, convrstnId, fileFullPath: uploaded.fileFullPath, question: "", enableExtDocse: false },
         handleProgressEvent,
+        handleLogEvent,
       )
 
       const elapsed = Math.round((Date.now() - startTimeRef.current) / 100) / 10
@@ -350,6 +360,12 @@ export function NoticeScanAgentPage() {
                 <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{elapsedSec}s</span>
               </div>
             )}
+            {!isMobile && result?.summary && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", lineHeight: 1.3 }}>
+                <span style={{ fontSize: 11.5, color: "#8A93A6" }}>⏱ 예상 단축 시간</span>
+                <span style={{ fontSize: 12.5, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace", color: "#0B7C56" }}>{result.summary.timeSavedSec}s</span>
+              </div>
+            )}
             {(pageStatus === "done" || pageStatus === "error") && (
               <button
                 onClick={reset}
@@ -377,6 +393,12 @@ export function NoticeScanAgentPage() {
                 <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace" }}>{elapsedSec}s</span>
               </div>
             )}
+            {result?.summary && (
+              <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, color: "#8A93A6" }}>⏱ 단축</span>
+                <span style={{ fontSize: 12, fontWeight: 600, fontFamily: "'IBM Plex Mono', monospace", color: "#0B7C56" }}>{result.summary.timeSavedSec}s</span>
+              </div>
+            )}
           </div>
         )}
       </header>
@@ -395,7 +417,7 @@ export function NoticeScanAgentPage() {
       {pageStatus === "idle" || pageStatus === "uploading" || pageStatus === "error" ? (
         <UploadZone pageStatus={pageStatus} fileName={fileName} errorMsg={errorMsg} onFileChange={handleFileChange} />
       ) : pageStatus === "analyzing" ? (
-        <AnalyzingView progressSteps={progressSteps} pipeline={pipelineSteps} />
+        <AnalyzingView progressSteps={progressSteps} pipeline={pipelineSteps} logs={logs} />
       ) : isDashboard ? (
         <ExtractionDashboard result={result!} fileName={fileName ?? ""} />
       ) : (

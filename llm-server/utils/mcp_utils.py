@@ -309,3 +309,33 @@ def call_tool(sse_client_addr, tool_info):
             }
 
     return asyncio.run(_call_tool_async())
+
+
+def call_tool_with_self_correction(rlog, sse_client_addr, tool_info, context_name, max_retries: int = 1):
+    """
+    call_tool()을 감싸 [🔌 MCP CALL] 로그를 남기고, 실패 시 [🔄 SELF-CORRECTION]
+    로그를 남긴 뒤 자동으로 재시도하는 래퍼.
+
+    call_tool()은 예외를 던지지 않고 {"status": "failed", "error_message": ...}를
+    반환하므로, 실패 여부는 response["status"]로 판단한다.
+    :param rlog: ReasoningLog 인스턴스 (utils.reasoning_log)
+    :param sse_client_addr: MCP 서버 주소
+    :param tool_info: {"tool": 도구 이름, "input": 인자} 딕셔너리
+    :param context_name: 로그에 표시할 MCP 컨텍스트(서버/도구군) 이름
+    :param max_retries: 실패 시 재시도 횟수
+    """
+    rlog.mcp_call(context_name, tool_info["tool"], tool_info["input"])
+    response = call_tool(sse_client_addr, tool_info)
+
+    attempt = 0
+    while response.get("status") == "failed" and attempt < max_retries:
+        attempt += 1
+        rlog.correction(
+            error=response.get("error_message", "Unknown error"),
+            cause="MCP 도구 호출 실패 (네트워크 지연 또는 서버 오류 가능성)",
+            plan=f"'{tool_info['tool']}' 도구 호출을 재시도합니다. ({attempt}/{max_retries})",
+        )
+        rlog.retrying()
+        response = call_tool(sse_client_addr, tool_info)
+
+    return response

@@ -145,6 +145,18 @@ def get_tc_llm():
 def get_embeddings():
     return settings.get_embeddings()
 
+def describe_llm_model() -> str:
+    """추론 로그에 표시할, 실제로 사용 중인 답변 생성용 LLM 이름."""
+    if settings.LLM_MODEL == "AzureChatOpenAI":
+        return f"AzureOpenAI/{settings.AOAI_DEPLOY_GPT_MINI}"
+    return f"Ollama/{settings.LLM_MODEL}"
+
+def describe_tc_llm_model() -> str:
+    """추론 로그에 표시할, 실제로 사용 중인 도구 호출(Tool-Calling)용 LLM 이름."""
+    if settings.TC_LLM_MODEL == "AzureChatOpenAI":
+        return f"AzureOpenAI/{settings.AOAI_DEPLOY_GPT_MINI}"
+    return f"Ollama/{settings.TC_LLM_MODEL}"
+
 def get_logger(log_dir="./log",log_filename_prefix="default_log"):
 
     # 1. 로그 디렉토리가 없으면 생성 (exist_ok=True는 폴더가 이미 있어도 에러를 내지 않음)

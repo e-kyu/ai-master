@@ -1,12 +1,13 @@
 import json
 import re
+from typing import Optional
 from utils import config
 from repository import conversation_repository
 from datetime import datetime
 
 logger = config.get_logger("./log", "llm-server")
 
-def get_conversation_context(conversation_id: str, question: str) -> str:
+def get_conversation_context(conversation_id: str, question: str, rlog: Optional[object] = None) -> str:
     """
     기존 대화 맥락을 조회하거나, 없는 경우 최근 대화 내역을 바탕으로 LLM을 통해 맥락을 요약하여 반환합니다.
     """
@@ -64,12 +65,19 @@ def get_conversation_context(conversation_id: str, question: str) -> str:
               """
              )
 
+    model = config.describe_llm_model()
     try:
         # 4. LLM 호출 및 결과 처리
-        logger.debug(f"[ConvrstnContext] 맥락 요약 LLM 호출 convrstn_id={convrstn_id}")
+        logger.debug(f"[ConvrstnContext] 맥락 요약 LLM 호출 conversation_id={conversation_id}")
+        if rlog:
+            rlog.llm_call(
+                model, "이전 대화 맥락 연관성 판별 및 JSON 요약",
+                prompt_preview=f"최근 대화 {len(conversation_details)}건 vs 현재 질문: {question}",
+                params={"history_count": len(conversation_details)},
+            )
         response = config.get_llm().invoke(prompt)
         new_context = response.content.strip() if hasattr(response, 'content') else str(response).strip()
-        logger.debug(f"[ConvrstnContext] 맥락 요약 LLM 응답 convrstn_id={convrstn_id} response={new_context[:200]}")
+        logger.debug(f"[ConvrstnContext] 맥락 요약 LLM 응답 conversation_id={conversation_id} response={new_context[:200]}")
 
         # JSON 형식 추출 및 파싱
         context_data = {}
@@ -78,21 +86,29 @@ def get_conversation_context(conversation_id: str, question: str) -> str:
             try:
                 context_data = json.loads(json_match.group(0))
             except json.JSONDecodeError:
-                logger.error(f"[ConvrstnContext] 맥락 JSON 파싱 실패 convrstn_id={convrstn_id} raw={new_context[:200]}")
+                logger.error(f"[ConvrstnContext] 맥락 JSON 파싱 실패 conversation_id={conversation_id} raw={new_context[:200]}")
 
         # 5. 생성된 맥락이 있다면 DB 업데이트
         if context_data:
             conversation_repository.update_conversation_context(conversation_id, context_data)
             logger.info(f"[ConversationContext] 맥락 갱신 완료 conversation_id={conversation_id} topic={context_data.get('topic')}")
+            if rlog:
+                rlog.llm_response(
+                    model,
+                    f"대화 흐름이 이어진다고 판단 — topic=\"{context_data.get('topic', '')}\", current_goal=\"{context_data.get('current_goal', '')}\"",
+                    output_preview=new_context,
+                )
         else:
             logger.info(f"[ConversationContext] 주제 전환으로 판단되어 맥락을 비웁니다 conversation_id={conversation_id}")
+            if rlog:
+                rlog.llm_response(model, "이전 대화와 무관한 새 주제로 판단 — 맥락을 비움(empty)", output_preview=new_context)
 
         return context_data
     except Exception as e:
         logger.error(f"[ConversationContext] 맥락 생성 중 오류 발생 conversation_id={conversation_id}: {e}")
         return ""
 
-def enhance_query_with_context(conversation_context: str, question: str) -> str:
+def enhance_query_with_context(conversation_context: str, question: str, rlog: Optional[object] = None) -> str:
     """
     이전 대화 맥락을 바탕으로 사용자의 질문을 구체화된 질의문으로 재작성합니다.
 
@@ -137,9 +153,22 @@ def enhance_query_with_context(conversation_context: str, question: str) -> str:
         "# 최종 재작성된 쿼리:"
     )
 
+    model = config.describe_llm_model()
+    if rlog:
+        rlog.llm_call(
+            model, "대명사 복원 및 의도 보완을 통한 검색 질의 재작성",
+            prompt_preview=f"원본 질문: \"{question}\" / 대화 맥락: {conversation_context or '(없음)'}",
+        )
+
     response = config.get_llm().invoke(contextual_query_enhancer_prompt)
     enhanced_query = response.content.strip() if hasattr(response, 'content') else str(response).strip()
 
     logger.info(f"[ConversationContext] 질의 강화 완료 enhanced_query={enhanced_query[:100]}")
+    if rlog:
+        changed = enhanced_query.strip() != question.strip()
+        rlog.llm_response(
+            model,
+            f'질의 재작성 {"적용됨" if changed else "변경 없음(원본 유지)"} → "{enhanced_query}"',
+        )
 
     return enhanced_query

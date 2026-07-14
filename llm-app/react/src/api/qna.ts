@@ -1,10 +1,11 @@
 import { API_BASE_URL, ApiError } from "./client"
-import type { AgentProgressEvent, NoticeScanResult, QuestionRequest } from "../types"
+import type { AgentProgressEvent, AgentStreamEvent, NoticeScanResult, QuestionRequest, ReasoningLogEvent } from "../types"
 
-// PpsAssistAgent: 백엔드가 text/plain 스트림으로 응답 -> 청크 단위로 onChunk 콜백 호출
+// PpsAssistAgent: 백엔드가 SSE 스트림으로 응답 -> log 이벤트는 onLog, 답변 청크는 onChunk로 분기
 export async function askQuestionStreaming(
   request: QuestionRequest,
   onChunk: (chunkText: string, fullTextSoFar: string) => void,
+  onLog?: (event: ReasoningLogEvent) => void,
 ): Promise<string> {
   const res = await fetch(`${API_BASE_URL}/convrstn/question`, {
     method: "POST",
@@ -17,25 +18,42 @@ export async function askQuestionStreaming(
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder("utf-8")
+  let buffer = ""
   let fullText = ""
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    const chunkText = decoder.decode(value, { stream: true })
-    if (chunkText) {
-      fullText += chunkText
-      onChunk(chunkText, fullText)
+    buffer += decoder.decode(value, { stream: true })
+
+    const lines = buffer.split("\n")
+    buffer = lines.pop() ?? ""
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue
+      try {
+        const event: AgentStreamEvent = JSON.parse(line.slice(6))
+        if (event.type === "log") {
+          onLog?.(event)
+        } else if (event.type === "answer_chunk") {
+          fullText += event.content
+          onChunk(event.content, fullText)
+        }
+        // "done" -> 별도 처리 없음 (스트림 종료로 자연 처리)
+      } catch {
+        // ignore malformed SSE lines
+      }
     }
   }
 
   return fullText
 }
 
-// NoticeScanAgent: 백엔드 SSE 스트림을 읽으며 진행상태 콜백 호출, 최종 result 반환
+// NoticeScanAgent: 백엔드 SSE 스트림을 읽으며 진행상태/추론로그 콜백 호출, 최종 result 반환
 export async function analyzeNoticeStreaming(
   request: QuestionRequest,
   onProgress: (event: AgentProgressEvent) => void,
+  onLog?: (event: ReasoningLogEvent) => void,
 ): Promise<NoticeScanResult> {
   const res = await fetch(`${API_BASE_URL}/convrstn/question`, {
     method: "POST",
@@ -62,10 +80,12 @@ export async function analyzeNoticeStreaming(
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue
       try {
-        const event: AgentProgressEvent = JSON.parse(line.slice(6))
+        const event: AgentStreamEvent = JSON.parse(line.slice(6))
         if (event.type === "result" && event.data) {
           result = event.data
-        } else {
+        } else if (event.type === "log") {
+          onLog?.(event)
+        } else if (event.type === "progress") {
           onProgress(event)
         }
       } catch {

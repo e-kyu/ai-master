@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from utils import config, default_prompt, conversation_context_utils, mcp_utils
+from utils.reasoning_log import llm_call_event, llm_response_event
 
 
 from repository import conversation_repository, agent_repository
@@ -43,24 +44,46 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
     agent_info = agent_repository.read_agent(request.agent_id)
 
     if request.agent_mode == "PpsAssistAgent":
-        agent_state = await pps_assist_agent.run(agent_info, request.convrstnId, request.question, request.fileFullPath, request.enableExtDocse)
-        logger.info(f"[ConversationRouter] PpsAssistAgent 워크플로우 완료, 최종 답변 스트리밍 시작 conversation_id={request.convrstnId}")
-
         # tc_llm은 도구 호출용이므로, 일반 답변 생성에는 get_llm()을 사용하는 것이 적절할 수 있음
         # 하지만 일관성을 위해 tc_llm을 유지하되, 스트리밍이 필요한 경우 invoke 대신 stream 사용 고려
         final_llm = config.get_llm().bind(stream=True)
 
         async def event_generator():
+            agent_state = None
+            async for event in pps_assist_agent.run_stream(agent_info, request.convrstnId, request.question, request.fileFullPath, request.enableExtDocse):
+                if event.get("type") == "state":
+                    agent_state = event.get("data")
+                else:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+            logger.info(f"[ConversationRouter] PpsAssistAgent 워크플로우 완료, 최종 답변 스트리밍 시작 conversation_id={request.convrstnId}")
+
+            answer_model = config.describe_llm_model()
+            call_event, call_text = llm_call_event(
+                pps_assist_agent.AGENT_NAME, answer_model,
+                "수집된 RAG 컨텍스트(첨부문서/법령/웹검색 결과)를 종합해 사용자에게 보여줄 최종 답변 생성",
+                prompt_preview=f"질문: \"{request.question}\" 기반, 컨텍스트 메시지 {len(agent_state['rag_answer'])}건 결합",
+            )
+            logger.info(f"[{pps_assist_agent.AGENT_NAME}] {call_text}")
+            yield f"data: {json.dumps(call_event, ensure_ascii=False)}\n\n"
+
             full_response = ""
             try:
                 async for chunk in final_llm.astream(agent_state['rag_answer']):
                     if chunk.content:
                         full_response += chunk.content
-                        yield chunk.content
+                        yield f"data: {json.dumps({'type': 'answer_chunk', 'content': chunk.content}, ensure_ascii=False)}\n\n"
+
+                resp_event, resp_text = llm_response_event(
+                    pps_assist_agent.AGENT_NAME, answer_model,
+                    f"답변 생성 완료 ({len(full_response)}자)", output_preview=full_response,
+                )
+                logger.info(f"[{pps_assist_agent.AGENT_NAME}] {resp_text}")
+                yield f"data: {json.dumps(resp_event, ensure_ascii=False)}\n\n"
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
             finally:
-                
+
                 if await raw_request.is_disconnected():
                     try:
                         # 연결이 끊긴 경우 스트리밍을 중단하고 나머지 결과를 한 번에 받아 DB에 저장
@@ -68,12 +91,13 @@ async def stream_qna_workflow(request: QuestionRequest, raw_request: Request):
                         full_response = remaining_response.content
                     except Exception as e:
                         logger.error(f"disconnected error: {e}")
-                        
+
                 # 생성이 완료된 후(또는 에러 발생 후) DB에 저장
                 conversation_repository.create_conversation_answer(request.convrstnId, {"convrstn_details_id": agent_state['conversation_details_id'], "answer": full_response, "agent_id": request.agent_id, "answer_at": datetime.now()})
                 logger.info(f"[ConversationRouter] 최종 답변 스트리밍 및 저장 완료 conversation_id={request.convrstnId} answer_length={len(full_response)}")
+                yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
-        return StreamingResponse(event_generator(), media_type="text/plain")
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
     elif request.agent_mode == "NoticeScanAgent":
         agent = PureLangNoticeScanAgent()
         logger.info(f"[ConversationRouter] NoticeScanAgent 파이프라인 가동(스트리밍) conversation_id={request.convrstnId} file={request.fileFullPath}")

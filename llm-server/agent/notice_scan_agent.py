@@ -1,10 +1,14 @@
 import asyncio
+import json
 from typing import AsyncGenerator, Dict, Any, Optional, Literal, TypedDict
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph, END
 from utils import config, mcp_utils
+from utils.reasoning_log import ReasoningLog
 from agent.notice_scan_structure import ProcurementData
+
+AGENT_NAME = "NoticeScanAgent"
 
 
 class AgentState(TypedDict):
@@ -65,7 +69,9 @@ class PureLangNoticeScanAgent:
 
     def convert_to_markdown_node(self, state: AgentState) -> Dict[str, Any]:
         writer = get_stream_writer()
+        rlog = ReasoningLog(self.logger, writer, AGENT_NAME)
         self.logger.info(f"[NoticeScan][convert_to_markdown] 시작 file_path={state['file_path']}")
+        rlog.mcp_call("doc-rag", "convert_to_markdown", {"file_path": state["file_path"]})
         writer({"type": "progress", "step": "convert_to_markdown", "label": "문서 변환", "status": "running", "message": "문서를 마크다운으로 변환하는 중..."})
 
         tool_info = {
@@ -113,7 +119,14 @@ class PureLangNoticeScanAgent:
 
     def extract_metadata_node(self, state: AgentState) -> Dict[str, Any]:
         writer = get_stream_writer()
+        rlog = ReasoningLog(self.logger, writer, AGENT_NAME)
         self.logger.info(f"[NoticeScan][extract_metadata] 시작 file_path={state['file_path']}")
+        answer_model = config.describe_llm_model()
+        rlog.llm_call(
+            answer_model,
+            "공고서 원문에서 필수 항목을 구조화된 데이터로 추출",
+            prompt_preview=state["document_text"],
+        )
         writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "running", "message": "메타데이터 구조화 및 규정 위반 검증 중..."})
 
         chain = self.prompt | self.structured_llm
@@ -123,6 +136,7 @@ class PureLangNoticeScanAgent:
             is_violating = bool(data_dict.get("regulatory_review_notice"))
 
             self.logger.info(f"[NoticeScan][extract_metadata] 완료 file_path={state['file_path']} is_violating={is_violating}")
+            rlog.llm_response(answer_model, "구조화 데이터 추출 완료", output_preview=json.dumps(data_dict, ensure_ascii=False))
             writer({"type": "progress", "step": "extract_metadata", "label": "정보 추출", "status": "done", "message": "추출 완료"})
             return {
                 "extracted_data": data_dict,
@@ -139,7 +153,11 @@ class PureLangNoticeScanAgent:
             }
 
     def error_handling_node(self, state: AgentState) -> Dict[str, Any]:
-        self.logger.error(f"[NoticeScan][error_handler] 파이프라인 중단 file_path={state['file_path']} reason={state['error_message']}")
+        writer = get_stream_writer()
+        rlog = ReasoningLog(self.logger, writer, AGENT_NAME)
+        error_msg = state.get("error_message", "Unknown error")
+        self.logger.error(f"[NoticeScan][error_handler] 파이프라인 중단 file_path={state['file_path']} reason={error_msg}")
+        rlog.correction(error_msg, "파이프라인 단계 실패", "사용자에게 에러 사유를 반환하고 파이프라인을 중단합니다.")
         return {
             "extracted_data": {
                 "error": "Pipeline Interrupted",

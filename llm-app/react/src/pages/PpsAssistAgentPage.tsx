@@ -5,6 +5,8 @@ import { askQuestionStreaming } from "../api/qna"
 import { ChatMessageBubble } from "../components/chat/ChatMessage"
 import { ChatInput } from "../components/chat/ChatInput"
 import { EmptyState } from "../components/common/EmptyState"
+import { ReasoningLogTerminal } from "../components/common/ReasoningLogTerminal"
+import type { ReasoningLogEvent } from "../types"
 
 export function PpsAssistAgentPage() {
   const {
@@ -19,6 +21,7 @@ export function PpsAssistAgentPage() {
   } = useAppState()
 
   const [sending, setSending] = useState(false)
+  const [logs, setLogs] = useState<ReasoningLogEvent[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const autoSentRef = useRef(false)
@@ -31,6 +34,7 @@ export function PpsAssistAgentPage() {
     if (!selectedAgent) return
     appendMessage({ question, answer: "" })
     setSending(true)
+    setLogs([])
     try {
       await askQuestionStreaming(
         {
@@ -42,6 +46,7 @@ export function PpsAssistAgentPage() {
           enableExtDocse,
         },
         (_chunk, fullTextSoFar) => updateLastMessageAnswer(fullTextSoFar),
+        (event) => setLogs((prev) => [...prev, event]),
       )
       refreshHistory()
     } catch {
@@ -99,6 +104,12 @@ export function PpsAssistAgentPage() {
         )}
         <div ref={bottomRef} />
       </div>
+
+      {logs.length > 0 && (
+        <div className="px-4 pb-3 sm:px-6">
+          <ReasoningLogTerminal logs={logs} active={sending} defaultOpen={sending} />
+        </div>
+      )}
 
       <ChatInput disabled={sending} onSend={handleSend} />
     </div>

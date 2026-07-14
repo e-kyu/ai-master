@@ -96,12 +96,20 @@ export interface NoticeExtractedData {
   statuses?: unknown[]
 }
 
+export interface NoticeScanSummary {
+  successRate: number
+  processedCount: number
+  elapsedSec: number
+  timeSavedSec: number
+}
+
 export interface NoticeScanResult {
   is_violating?: boolean
   extracted_data?: NoticeExtractedData
   document_text?: string
   status?: string
   error_message?: string | null
+  summary?: NoticeScanSummary
   [key: string]: unknown
 }
 
@@ -113,3 +121,24 @@ export interface AgentProgressEvent {
   status?: "running" | "done" | "failed"
   data?: NoticeScanResult
 }
+
+export type ReasoningPhase = "planning" | "evaluating" | "llm_call" | "mcp_call" | "correction" | "execution"
+
+export interface ReasoningLogEvent {
+  type: "log"
+  agent: string
+  phase: ReasoningPhase
+  message: string
+  level?: "error"
+}
+
+export interface AnswerChunkEvent {
+  type: "answer_chunk"
+  content: string
+}
+
+export interface DoneEvent {
+  type: "done"
+}
+
+export type AgentStreamEvent = AgentProgressEvent | ReasoningLogEvent | AnswerChunkEvent | DoneEvent
