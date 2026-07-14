@@ -93,7 +93,7 @@ export function PpsAssistAgentPage() {
               onChange={(e) => setEnableExtDocse(e.target.checked)}
               className="size-3.5 rounded border-zinc-300 text-brand-600 focus:ring-brand-400"
             />
-            외부 문서 검색 허용
+            웹 검색 허용
           </label>
         </div>
 
